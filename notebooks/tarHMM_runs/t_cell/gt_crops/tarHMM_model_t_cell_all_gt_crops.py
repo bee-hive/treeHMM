@@ -364,7 +364,10 @@ print("=" * 60)
 states_flat = np.array(masked_state_assignments.T).flatten()
 emissions_flat = np.array(emissions.reshape(-1, emissions.shape[-1]))
 
-feature_names = ['velocity', 'cancer_neighbors', 't_cell_neighbors']
+# Load feature names from the file saved by calculating_example_t_cell_emissions.py
+_names_path = os.path.join(emissions_base_dir, crop_ids[0], 't_cell_emissions_names.txt')
+with open(_names_path, 'r') as _f:
+    feature_names = [line.strip() for line in _f if line.strip()]
 plot_type = ['violin', 'hist', 'hist']
 df = pd.DataFrame(emissions_flat, columns=feature_names)
 df['state'] = states_flat
