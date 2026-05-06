@@ -174,5 +174,5 @@ cython_debug/
 .pypirc
 
 # repo-specific
-data/
+notebooks/data/
 *_.DS_Store
