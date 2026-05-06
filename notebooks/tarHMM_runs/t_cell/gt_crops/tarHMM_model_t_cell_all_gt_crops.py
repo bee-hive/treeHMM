@@ -122,6 +122,9 @@ for crop_idx, crop in enumerate(crop_ids):
     cvat_tracks = tifffile.imread(os.path.join(cvat_base_dir, well_id, crop, 'ALL_tracks.tiff'))
     cell_type_dict = pickle.load(open(os.path.join(cvat_base_dir, well_id, crop, 'full_cell_type_dict.pkl'), "rb"))
 
+    # remove the t=0 time frame from cvat_tracks since it has been removed from the emissions too
+    cvat_tracks = cvat_tracks[1:, ...]
+
     type_tracks_per_well = {}
     for cell_type in ['cancer', 't_cell']:
         type_tracks_per_well[cell_type] = filter_tracks_by_type(cell_type, cvat_tracks, cell_type_dict)
