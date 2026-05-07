@@ -1,16 +1,23 @@
 """
 Jointly fit AR-HMM across all ground-truth T cell crops.
 
-This script is equivalent to tarHMM_model_dryrun_t_cell_example.ipynb
-but fits one HMM jointly across all six crops.
+Fits one AR-HMM jointly across all crops defined in config.yml.
 
-Outputs:
-1) One plot of masked_state_assignments across all T cells with crop colorbar
-2) Feature distribution plots per state (all crops combined)
-3) Per-crop t_cell_state_assignments.npy files
+Outputs (all under output_base_dir):
+  1) all_crops_state_assignments.png   - heatmap with crop colorbar
+  2) all_crops_feature_distributions.png - per-state feature distributions
+  3) {crop_id}/t_cell_state_assignments.npy - per-crop state arrays
+
+Usage (treeHMM_env):
+    conda run -n treeHMM_env python fit_arhmm.py
 """
 
+import os
+import sys
 import pickle
+from pathlib import Path
+
+import yaml
 import numpy as np
 import tifffile
 import pandas as pd
@@ -18,28 +25,23 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.patches import Patch
-import os
-import sys
 
-sys.path.insert(0, '/gladstone/engelhardt/lab/adamw/treeHMM')
+# ---------------------------------------------------------------------------
+# Load shared configuration
+# ---------------------------------------------------------------------------
+_script_dir = Path(__file__).resolve().parent
+with open(_script_dir / "config.yml", "r") as f:
+    cfg = yaml.safe_load(f)
 
-# ============================================================
-# Configuration
-# ============================================================
-crop_ids = [
-    'B4_t50t100y200y350x750x900',
-    'B8_t50t100y200y350x750x900',
-    'E4_t50t100y200y350x750x900',
-    'B4_t250t300y200y350x750x900',
-    'B8_t250t300y200y350x750x900',
-    'E4_t250t300y200y350x750x900',
-]
+crop_ids = cfg["crop_ids"]
+cvat_base_dir = cfg["cvat_base_dir"]
+out_base_dir = cfg["output_base_dir"]
+num_states = cfg["num_states"]
+min_t = cfg["min_t"]
+num_lags = cfg["num_lags"]
+feature_names = cfg["emission_feature_names"]
 
-cvat_base_dir = '/gladstone/engelhardt/lab/adamw/MarsonImagingPipeline/data/ground_truth_tracking_annotations/cvat_annotations/TCR-T/'
-emissions_base_dir = '/gladstone/engelhardt/lab/adamw/treeHMM/notebooks/data/example_gt_crop'
-out_base_dir = '/gladstone/engelhardt/lab/adamw/treeHMM/notebooks/data/example_gt_crop'
-
-num_states = 4
+sys.path.insert(0, cfg["treehmm_dir"])
 
 
 # ============================================================
@@ -47,16 +49,14 @@ num_states = 4
 # ============================================================
 def filter_tracks_by_type(track_type, tracks, type_dict):
     """Filter tracks to only contain tracks of the desired cell type."""
-    valid_ids = [cell_id for cell_id, cell_type in type_dict.items() if cell_type == track_type]
-    filtered_tracks = tracks.copy()
-    filtered_tracks[~np.isin(filtered_tracks, valid_ids)] = 0
-    return filtered_tracks
+    valid_ids = [cid for cid, ctype in type_dict.items() if ctype == track_type]
+    filtered = tracks.copy()
+    filtered[~np.isin(filtered, valid_ids)] = 0
+    return filtered
 
 
 def filter_tracks_by_time(data, emissions, min_t=10):
-    """
-    Filters 'data' and 'emissions' objects to retain only cells present
-    in at least min_t unique time frames.
+    """Filter data and emissions to retain cells present >= min_t frames.
 
     Returns:
         tuple: (filtered_data, filtered_emissions, keep_indices)
@@ -67,12 +67,13 @@ def filter_tracks_by_time(data, emissions, min_t=10):
     if len(keep_indices) == 0:
         print(f"Warning: No cells found with duration >= {min_t} frames.")
         T, _, D = emissions.shape
-        empty_data = {k: np.zeros((T, 0), dtype=v.dtype) if isinstance(v, np.ndarray) else v
-                      for k, v in data.items()}
+        empty_data = {
+            k: np.zeros((T, 0), dtype=v.dtype) if isinstance(v, np.ndarray) else v
+            for k, v in data.items()
+        }
         return empty_data, np.zeros((T, 0, D)), keep_indices
 
     filtered_emissions = emissions[:, keep_indices, :]
-
     filtered_data = {}
     for key, val in data.items():
         if isinstance(val, np.ndarray) and val.ndim >= 2:
@@ -80,11 +81,11 @@ def filter_tracks_by_time(data, emissions, min_t=10):
         else:
             filtered_data[key] = val
 
-    old_to_new = {old_idx: new_idx for new_idx, old_idx in enumerate(keep_indices)}
-    max_old_idx = data['parent_indices'].max()
-    lookup = np.full(max_old_idx + 1, -1, dtype=np.int32)
-    for old_idx, new_idx in old_to_new.items():
-        lookup[old_idx] = new_idx
+    old_to_new = {old: new for new, old in enumerate(keep_indices)}
+    max_old = data['parent_indices'].max()
+    lookup = np.full(max_old + 1, -1, dtype=np.int32)
+    for old, new in old_to_new.items():
+        lookup[old] = new
 
     curr_parents = filtered_data['parent_indices']
     curr_active = filtered_data['active_mask']
@@ -101,7 +102,7 @@ def filter_tracks_by_time(data, emissions, min_t=10):
 
     filtered_data['parent_indices'] = new_parents
 
-    print(f"Filtered {data['active_mask'].shape[1]} cells down to {len(keep_indices)} cells.")
+    print(f"Filtered {data['active_mask'].shape[1]} -> {len(keep_indices)} cells.")
     return filtered_data, filtered_emissions, keep_indices
 
 
@@ -119,17 +120,21 @@ crop_labels = []
 for crop_idx, crop in enumerate(crop_ids):
     well_id = crop.split("_")[0]
 
-    cvat_tracks = tifffile.imread(os.path.join(cvat_base_dir, well_id, crop, 'ALL_tracks.tiff'))
-    cell_type_dict = pickle.load(open(os.path.join(cvat_base_dir, well_id, crop, 'full_cell_type_dict.pkl'), "rb"))
+    cvat_tracks = tifffile.imread(
+        os.path.join(cvat_base_dir, well_id, crop, 'ALL_tracks.tiff')
+    )
+    cell_type_dict = pickle.load(
+        open(os.path.join(cvat_base_dir, well_id, crop, 'full_cell_type_dict.pkl'), "rb")
+    )
 
-    # remove the t=0 time frame from cvat_tracks since it has been removed from the emissions too
+    # remove the t=0 time frame (removed from emissions too)
     cvat_tracks = cvat_tracks[1:, ...]
 
-    type_tracks_per_well = {}
-    for cell_type in ['cancer', 't_cell']:
-        type_tracks_per_well[cell_type] = filter_tracks_by_type(cell_type, cvat_tracks, cell_type_dict)
+    type_tracks = {}
+    for ct in ['cancer', 't_cell']:
+        type_tracks[ct] = filter_tracks_by_type(ct, cvat_tracks, cell_type_dict)
 
-    t_cell_tracks = type_tracks_per_well['t_cell']
+    t_cell_tracks = type_tracks['t_cell']
     print(f"Crop {crop}: t_cell_tracks shape = {t_cell_tracks.shape}")
 
     data = {}
@@ -147,15 +152,14 @@ for crop_idx, crop in enumerate(crop_ids):
     parent_indices = np.zeros((T, num_cells), dtype=np.int32)
 
     for t in range(T):
-        t_cell_frame = t_cell_tracks[t]
-        frame_ids = np.unique(t_cell_frame[t_cell_frame > 0])
+        frame_ids = np.unique(t_cell_tracks[t][t_cell_tracks[t] > 0])
         for cid in frame_ids:
             active_mask[t, id_to_col[int(cid)]] = True
 
     for cid, col in id_to_col.items():
         active_frames = np.where(active_mask[:, col])[0]
         if len(active_frames) == 0:
-            print(f"Warning: Cell ID {cid} (col {col}) is never active. Skipping.")
+            print(f"Warning: Cell ID {cid} (col {col}) is never active.")
             continue
         first_frame = active_frames[0]
         is_new_root_mask[first_frame, col] = True
@@ -172,9 +176,9 @@ for crop_idx, crop in enumerate(crop_ids):
     crop_num_cells.append(num_cells)
     crop_labels.extend([crop_idx] * num_cells)
 
-    print(f"  active_mask shape:       {active_mask.shape}")
-    print(f"  Division events (daughters): {is_division_mask.sum()}")
-    print(f"  Root cells:                  {is_new_root_mask.sum()}")
+    print(f"  active_mask shape:  {active_mask.shape}")
+    print(f"  Division events:    {is_division_mask.sum()}")
+    print(f"  Root cells:         {is_new_root_mask.sum()}")
     print()
 
 
@@ -192,27 +196,28 @@ crop_labels = np.array(crop_labels)
 print(f"Total T cells across all crops: {total_cells}")
 print(f"T = {T}")
 
-combined_active_mask = np.zeros((T, total_cells), dtype=bool)
-combined_is_division_mask = np.zeros((T, total_cells), dtype=bool)
-combined_is_new_root_mask = np.zeros((T, total_cells), dtype=bool)
-combined_parent_indices = np.zeros((T, total_cells), dtype=np.int32)
+combined_active = np.zeros((T, total_cells), dtype=bool)
+combined_div = np.zeros((T, total_cells), dtype=bool)
+combined_root = np.zeros((T, total_cells), dtype=bool)
+combined_parent = np.zeros((T, total_cells), dtype=np.int32)
 
 cell_offset = 0
 for crop_data, nc in zip(all_data_list, crop_num_cells):
-    combined_active_mask[:, cell_offset:cell_offset+nc] = crop_data['active_mask']
-    combined_is_division_mask[:, cell_offset:cell_offset+nc] = crop_data['is_division_mask']
-    combined_is_new_root_mask[:, cell_offset:cell_offset+nc] = crop_data['is_new_root_mask']
-    combined_parent_indices[:, cell_offset:cell_offset+nc] = crop_data['parent_indices'] + cell_offset
+    s = slice(cell_offset, cell_offset + nc)
+    combined_active[:, s] = crop_data['active_mask']
+    combined_div[:, s] = crop_data['is_division_mask']
+    combined_root[:, s] = crop_data['is_new_root_mask']
+    combined_parent[:, s] = crop_data['parent_indices'] + cell_offset
     cell_offset += nc
 
 combined_data = {
-    'active_mask': combined_active_mask,
-    'is_division_mask': combined_is_division_mask,
-    'is_new_root_mask': combined_is_new_root_mask,
-    'parent_indices': combined_parent_indices,
+    'active_mask': combined_active,
+    'is_division_mask': combined_div,
+    'is_new_root_mask': combined_root,
+    'parent_indices': combined_parent,
 }
 
-print(f"Combined active_mask shape: {combined_active_mask.shape}")
+print(f"Combined active_mask shape: {combined_active.shape}")
 
 
 # ============================================================
@@ -222,14 +227,13 @@ print("\n" + "=" * 60)
 print("Step 3: Loading pre-computed emissions for all crops")
 print("=" * 60)
 
-all_emissions_parts = []
+all_emissions = []
+for crop in crop_ids:
+    e = np.load(os.path.join(out_base_dir, crop, 't_cell_emissions_array.npy'))
+    all_emissions.append(e)
+    print(f"Crop {crop}: emissions shape = {e.shape}")
 
-for crop_idx, crop in enumerate(crop_ids):
-    emissions_crop = np.load(os.path.join(emissions_base_dir, crop, 't_cell_emissions_array.npy'))
-    all_emissions_parts.append(emissions_crop)
-    print(f"Crop {crop}: emissions shape = {emissions_crop.shape}")
-
-emissions = np.concatenate(all_emissions_parts, axis=1)
+emissions = np.concatenate(all_emissions, axis=1)
 print(f"\nCombined emissions shape: {emissions.shape}")
 
 
@@ -240,15 +244,16 @@ print("\n" + "=" * 60)
 print("Step 4: Filtering tracks by time")
 print("=" * 60)
 
-num_cells_before = combined_data['active_mask'].shape[1]
-combined_data, emissions, kept_indices = filter_tracks_by_time(combined_data, emissions, min_t=0)
+n_before = combined_data['active_mask'].shape[1]
+combined_data, emissions, kept_indices = filter_tracks_by_time(
+    combined_data, emissions, min_t=min_t
+)
 
-kept_mask = np.zeros(num_cells_before, dtype=bool)
+kept_mask = np.zeros(n_before, dtype=bool)
 kept_mask[kept_indices] = True
 crop_labels = crop_labels[kept_mask]
 
 print(f"After filtering: emissions shape = {emissions.shape}")
-print(f"After filtering: active_mask shape = {combined_data['active_mask'].shape}")
 print(f"Crop labels shape: {crop_labels.shape}")
 
 
@@ -264,7 +269,7 @@ import jax.random as jr
 from models.tarhmm import tARHMM
 
 emission_dim = emissions.shape[-1]
-arhmm = tARHMM(num_states, emission_dim, num_lags=1)
+arhmm = tARHMM(num_states, emission_dim, num_lags=num_lags)
 
 key = jr.PRNGKey(0)
 params, props = arhmm.initialize(key=key)
@@ -274,16 +279,18 @@ inputs = jnp.zeros_like(emissions_jnp)
 
 batched_emissions = emissions_jnp[None, ...]
 batched_inputs = inputs[None, ...]
-batched_parent_indices = jnp.array(combined_data['parent_indices'])[None, ...]
-batched_is_division_mask = jnp.array(combined_data['is_division_mask'])[None, ...]
-batched_active_mask = jnp.array(combined_data['active_mask'])[None, ...]
-batched_is_new_root_mask = jnp.array(combined_data['is_new_root_mask'])[None, ...]
+batched_parent = jnp.array(combined_data['parent_indices'])[None, ...]
+batched_div = jnp.array(combined_data['is_division_mask'])[None, ...]
+batched_active = jnp.array(combined_data['active_mask'])[None, ...]
+batched_root = jnp.array(combined_data['is_new_root_mask'])[None, ...]
 
-fitted_params, lps = arhmm.fit_em(params, props, batched_emissions, inputs=batched_inputs,
-    parent_indices=batched_parent_indices,
-    is_division_mask=batched_is_division_mask,
-    active_mask=batched_active_mask,
-    is_new_root_mask=batched_is_new_root_mask)
+fitted_params, lps = arhmm.fit_em(
+    params, props, batched_emissions, inputs=batched_inputs,
+    parent_indices=batched_parent,
+    is_division_mask=batched_div,
+    active_mask=batched_active,
+    is_new_root_mask=batched_root,
+)
 
 print("Fitted params:")
 print(fitted_params)
@@ -298,48 +305,51 @@ print("=" * 60)
 
 from models.tarhmm import tree_hmm_two_filter_smoother
 
-input_fwd = arhmm._inference_args(params, emissions_jnp, inputs,
+input_fwd = arhmm._inference_args(
+    params, emissions_jnp, inputs,
     combined_data['parent_indices'], combined_data['is_division_mask'],
-    combined_data['active_mask'], combined_data['is_new_root_mask'])
+    combined_data['active_mask'], combined_data['is_new_root_mask'],
+)
 
 posterior = tree_hmm_two_filter_smoother(*input_fwd)
 
 state_assignments = jnp.argmax(posterior.smoothed_probs, axis=-1)
 max_probs = jnp.max(posterior.smoothed_probs, axis=-1)
-
-masked_state_assignments = jnp.where(jnp.isnan(max_probs.T), jnp.nan, state_assignments.T)
+masked_state_assignments = jnp.where(
+    jnp.isnan(max_probs.T), jnp.nan, state_assignments.T
+)
 
 print(f"state_assignments shape: {state_assignments.shape}")
 print(f"masked_state_assignments shape: {masked_state_assignments.shape}")
 
 
 # ============================================================
-# Output 1: State assignments across all T cells with crop colorbar
+# Output 1: State assignments heatmap with crop colorbar
 # ============================================================
 print("\n" + "=" * 60)
 print("Output 1: State assignments heatmap with crop colorbar")
 print("=" * 60)
 
-num_cells_total = masked_state_assignments.shape[0]
-
-fig, axes = plt.subplots(1, 2, figsize=(14, 8),
-                         gridspec_kw={'width_ratios': [1, 30]},
-                         sharey=True)
+fig, axes = plt.subplots(
+    1, 2, figsize=(14, 8),
+    gridspec_kw={'width_ratios': [1, 30]}, sharey=True,
+)
 
 num_crops = len(crop_ids)
 crop_cmap = plt.cm.get_cmap('tab10', num_crops)
-crop_color_array = np.array(crop_labels).reshape(-1, 1)
+crop_arr = np.array(crop_labels).reshape(-1, 1)
 
-axes[0].imshow(crop_color_array, aspect='auto', interpolation='none',
-               cmap=crop_cmap, vmin=0, vmax=num_crops-1, origin='upper')
+axes[0].imshow(crop_arr, aspect='auto', interpolation='none',
+               cmap=crop_cmap, vmin=0, vmax=num_crops - 1, origin='upper')
 axes[0].set_xticks([])
 axes[0].set_ylabel('Cell')
 axes[0].set_title('Crop')
 
-legend_elements = [Patch(facecolor=crop_cmap(i), label=crop_ids[i]) for i in range(num_crops)]
+legend_elements = [Patch(facecolor=crop_cmap(i), label=crop_ids[i])
+                   for i in range(num_crops)]
 
-im = axes[1].imshow(np.array(masked_state_assignments), aspect='auto', interpolation='none',
-                     cmap='viridis', origin='upper')
+im = axes[1].imshow(np.array(masked_state_assignments), aspect='auto',
+                     interpolation='none', cmap='viridis', origin='upper')
 axes[1].set_xlabel('Time')
 axes[1].set_title('State Assignments (argmax of smoothed_probs) - All Crops')
 cbar = plt.colorbar(im, ax=axes[1], ticks=range(num_states))
@@ -349,13 +359,15 @@ fig.legend(handles=legend_elements, loc='lower center', ncol=3,
            fontsize=8, title='Crop ID', bbox_to_anchor=(0.5, -0.05))
 
 plt.tight_layout()
-plt.savefig(os.path.join(out_base_dir, 'all_crops_state_assignments.png'), dpi=150, bbox_inches='tight')
-plt.show()
+os.makedirs(out_base_dir, exist_ok=True)
+plt.savefig(os.path.join(out_base_dir, 'all_crops_state_assignments.png'),
+            dpi=150, bbox_inches='tight')
+plt.close()
 print("Saved state assignments plot.")
 
 
 # ============================================================
-# Output 2: Feature distributions per state (all crops combined)
+# Output 2: Feature distributions per state
 # ============================================================
 print("\n" + "=" * 60)
 print("Output 2: Feature distributions per state")
@@ -364,39 +376,30 @@ print("=" * 60)
 states_flat = np.array(masked_state_assignments.T).flatten()
 emissions_flat = np.array(emissions.reshape(-1, emissions.shape[-1]))
 
-# Load feature names from the file saved by calculating_example_t_cell_emissions.py
-_names_path = os.path.join(emissions_base_dir, crop_ids[0], 't_cell_emissions_names.txt')
-with open(_names_path, 'r') as _f:
-    feature_names = [line.strip() for line in _f if line.strip()]
 plot_type = ['violin', 'hist', 'hist']
 df = pd.DataFrame(emissions_flat, columns=feature_names)
 df['state'] = states_flat
-
 df_clean = df.dropna(subset=['state']).copy()
 df_clean['state'] = df_clean['state'].astype(int)
 
 fig, axes = plt.subplots(1, 3, figsize=(9, 3), tight_layout=True)
-
-for i, feature in enumerate(feature_names):
+for i, feat in enumerate(feature_names):
     if plot_type[i] == 'violin':
-        sns.violinplot(
-            data=df_clean, x='state', y=feature, hue='state',
-            ax=axes[i], palette='viridis', legend=False
-        )
-        axes[i].set_ylabel(f'{feature.replace("_", " ").title()}')
+        sns.violinplot(data=df_clean, x='state', y=feat, hue='state',
+                       ax=axes[i], palette='viridis', legend=False)
+        axes[i].set_ylabel(feat.replace("_", " ").title())
         axes[i].set_xlabel('AR-HMM State')
     elif plot_type[i] == 'hist':
-        sns.histplot(
-            data=df_clean, x=feature, hue='state',
-            ax=axes[i], palette='viridis',
-            common_norm=False, stat='density', element='step',
-            discrete=True, legend=False
-        )
-        axes[i].set_xlabel(f'{feature.replace("_", " ").title()}')
+        sns.histplot(data=df_clean, x=feat, hue='state',
+                     ax=axes[i], palette='viridis',
+                     common_norm=False, stat='density', element='step',
+                     discrete=True, legend=False)
+        axes[i].set_xlabel(feat.replace("_", " ").title())
     sns.despine(ax=axes[i])
 
-plt.savefig(os.path.join(out_base_dir, 'all_crops_feature_distributions.png'), dpi=150, bbox_inches='tight')
-plt.show()
+plt.savefig(os.path.join(out_base_dir, 'all_crops_feature_distributions.png'),
+            dpi=150, bbox_inches='tight')
+plt.close()
 print("Saved feature distribution plot.")
 
 
@@ -408,14 +411,14 @@ print("Output 3: Saving per-crop state assignments")
 print("=" * 60)
 
 for crop_idx, crop in enumerate(crop_ids):
-    cell_indices = np.where(crop_labels == crop_idx)[0]
-    crop_state_assignments = np.array(state_assignments[:, cell_indices])
+    cell_idx = np.where(crop_labels == crop_idx)[0]
+    crop_states = np.array(state_assignments[:, cell_idx])
 
-    out_dir = os.path.join(out_base_dir, crop)
-    os.makedirs(out_dir, exist_ok=True)
+    crop_dir = os.path.join(out_base_dir, crop)
+    os.makedirs(crop_dir, exist_ok=True)
 
-    out_path = os.path.join(out_dir, 't_cell_state_assignments.npy')
-    np.save(out_path, crop_state_assignments)
-    print(f"Saved {out_path} with shape {crop_state_assignments.shape}")
+    out_path = os.path.join(crop_dir, 't_cell_state_assignments.npy')
+    np.save(out_path, crop_states)
+    print(f"Saved {out_path} with shape {crop_states.shape}")
 
 print("\nDone!")

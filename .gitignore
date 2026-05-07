@@ -176,3 +176,4 @@ cython_debug/
 # repo-specific
 notebooks/data/
 *_.DS_Store
+analysis/

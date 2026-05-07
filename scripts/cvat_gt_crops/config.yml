@@ -1,0 +1,74 @@
+# ============================================================
+# Configuration for CVAT ground-truth crop analysis pipeline
+# ============================================================
+# This config is shared across all three pipeline steps:
+#   1. calculate_emissions.py   (AnalysisEnv)
+#   2. fit_arhmm.py             (treeHMM_env)
+#   3. create_overlay_videos.py (AnalysisEnv)
+
+# ------------------------------------------------------------------
+# Crop identifiers
+# ------------------------------------------------------------------
+crop_ids:
+  - B4_t50t100y200y350x750x900
+  - B8_t50t100y200y350x750x900
+  - E4_t50t100y200y350x750x900
+  - B4_t250t300y200y350x750x900
+  - B8_t250t300y200y350x750x900
+  - E4_t250t300y200y350x750x900
+
+# ------------------------------------------------------------------
+# Experimental conditions mapped to crop IDs
+# ------------------------------------------------------------------
+conditions_dict:
+  SH:
+    - B4_t50t100y200y350x750x900
+    - B4_t250t300y200y350x750x900
+  RASA2:
+    - E4_t50t100y200y350x750x900
+    - E4_t250t300y200y350x750x900
+  CUL5:
+    - B8_t50t100y200y350x750x900
+    - B8_t250t300y200y350x750x900
+
+# ------------------------------------------------------------------
+# Emission feature names (axis-2 of the emissions array)
+# ------------------------------------------------------------------
+emission_feature_names:
+  - velocity
+  - cancer_neighbors
+  - t_cell_neighbors
+
+# ------------------------------------------------------------------
+# AR-HMM model parameters
+# ------------------------------------------------------------------
+num_states: 4
+min_t: 0          # minimum number of active frames to keep a cell
+num_lags: 1       # AR lag order
+
+# ------------------------------------------------------------------
+# Input data paths
+# ------------------------------------------------------------------
+cvat_base_dir: /gladstone/engelhardt/lab/adamw/MarsonImagingPipeline/data/ground_truth_tracking_annotations/cvat_annotations/TCR-T/
+caliban_base_dir: /gladstone/engelhardt/lab/MarsonLabIncucyteData/groundTruthCalibanTracks/
+
+# External experiment config (used for TIME_FACTOR, etc.)
+experiment_config_path: /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/MarsonImagingPipeline/snakemake_configs/experiment.yml
+
+# MarsonImagingPipeline repo root (added to sys.path for imports)
+imaging_pipeline_dir: /gladstone/engelhardt/lab/adamw/MarsonImagingPipeline
+
+# treeHMM repo root (added to sys.path for model imports)
+treehmm_dir: /gladstone/engelhardt/lab/adamw/treeHMM
+
+# ------------------------------------------------------------------
+# Output base directory
+# Per-crop outputs are written to: {output_base_dir}/{crop_id}/
+# ------------------------------------------------------------------
+output_base_dir: /gladstone/engelhardt/lab/adamw/treeHMM/analysis/cvat_gt_crops
+
+# ------------------------------------------------------------------
+# Video rendering settings
+# ------------------------------------------------------------------
+video_fps: 2
+video_figsize: [6, 6]
