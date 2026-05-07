@@ -36,13 +36,13 @@ conditions_dict:
 # ------------------------------------------------------------------
 emission_feature_names:
   - velocity
-  - cancer_neighbors
+  - cancer_contact
   - t_cell_neighbors
 
 # ------------------------------------------------------------------
 # AR-HMM model parameters
 # ------------------------------------------------------------------
-num_states: 4
+num_states: 3
 min_t: 0          # minimum number of active frames to keep a cell
 num_lags: 1       # AR lag order
 

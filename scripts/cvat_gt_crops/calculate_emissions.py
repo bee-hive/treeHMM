@@ -4,7 +4,7 @@ Calculate T cell emissions for all ground-truth crops.
 Computes 3 features for every time frame a T cell is present across six
 video crops:
     0. velocity          - instantaneous velocity
-    1. cancer_neighbors  - number of cancer-cell neighbours
+    1. cancer_contact    - binary indicator of cancer-cell contact
     2. t_cell_neighbors  - number of T-cell neighbours
 
 Each crop's emissions are saved as a 3-D numpy array
@@ -44,8 +44,6 @@ sys.path.insert(0, cfg["imaging_pipeline_dir"])
 
 from scripts.utils.StatUtils import (
     compute_cell_velocities_per_frame_dict,
-    compute_cell_cell_contact_dict,
-    compute_all_cell_cell_contact_dict,
     compute_cell_cell_neighbor_dict,
     compute_all_cell_cell_neighbor_dict,
 )
@@ -132,11 +130,9 @@ t_cell_velocities_per_frame = {
 }
 
 print("\n" + "=" * 60)
-print("Step 3b: Calculating type-specific interactions")
+print("Step 3b: Calculating type-specific neighbors")
 print("=" * 60)
 
-cancer_type_specific_contacts_per_frame = {}
-t_cell_type_specific_contacts_per_frame = {}
 cancer_type_specific_neighbors_per_frame = {}
 t_cell_type_specific_neighbors_per_frame = {}
 
@@ -144,20 +140,15 @@ for well in cvat_tracks_per_well.keys():
     well_t = type_tracks_per_well["t_cell"][well]
     well_c = type_tracks_per_well["cancer"][well]
 
-    cc, tc = compute_cell_cell_contact_dict(well_t, well_c)
     cn, tn = compute_cell_cell_neighbor_dict(well_t, well_c)
 
-    cancer_type_specific_contacts_per_frame[well] = cc
-    t_cell_type_specific_contacts_per_frame[well] = tc
     cancer_type_specific_neighbors_per_frame[well] = cn
     t_cell_type_specific_neighbors_per_frame[well] = tn
 
 print("\n" + "=" * 60)
-print("Step 3c: Calculating type-agnostic interactions")
+print("Step 3c: Calculating type-agnostic neighbors")
 print("=" * 60)
 
-cancer_all_contacts_per_frame = {}
-t_cell_all_contacts_per_frame = {}
 cancer_all_neighbors_per_frame = {}
 t_cell_all_neighbors_per_frame = {}
 
@@ -165,11 +156,8 @@ for well in cvat_tracks_per_well.keys():
     well_t = type_tracks_per_well["t_cell"][well]
     well_c = type_tracks_per_well["cancer"][well]
 
-    cc, tc = compute_all_cell_cell_contact_dict(well_t, well_c)
     cn, tn = compute_all_cell_cell_neighbor_dict(well_t, well_c)
 
-    cancer_all_contacts_per_frame[well] = cc
-    t_cell_all_contacts_per_frame[well] = tc
     cancer_all_neighbors_per_frame[well] = cn
     t_cell_all_neighbors_per_frame[well] = tn
 
@@ -198,7 +186,7 @@ for crop in crop_ids:
             if cell_id in id_to_col:
                 emissions_array[frame, id_to_col[cell_id], 0] = velocity
 
-    # Features 1 & 2: cancer_neighbors and t_cell_neighbors
+    # Feature 1: binary cancer contact, Feature 2: t_cell_neighbors
     for frame in example_all_neighbors.keys():
         all_nbrs = example_all_neighbors[frame]
         type_nbrs = example_type_neighbors[frame]
@@ -206,7 +194,7 @@ for crop in crop_ids:
             if cell_id in id_to_col:
                 col = id_to_col[cell_id]
                 cancer_n = type_nbrs.get(cell_id, [0])[0]
-                emissions_array[frame, col, 1] = cancer_n
+                emissions_array[frame, col, 1] = 1 if cancer_n > 0 else 0
                 emissions_array[frame, col, 2] = neighbors - cancer_n
 
     # Drop t=0 frame (velocity undefined between t=-1 and t=0)
@@ -216,9 +204,5 @@ for crop in crop_ids:
     out_dir = os.path.join(out_base_dir, crop)
     os.makedirs(out_dir, exist_ok=True)
     np.save(os.path.join(out_dir, "t_cell_emissions_array.npy"), emissions_array)
-
-    with open(os.path.join(out_dir, "t_cell_emissions_names.txt"), "w") as fh:
-        for name in FEATURE_NAMES:
-            fh.write(name + "\n")
 
 print("\nDone!")
