@@ -4,9 +4,12 @@ Jointly fit AR-HMM across all ground-truth T cell crops.
 Fits one AR-HMM jointly across all crops defined in config.yml.
 
 Outputs (all under output_base_dir):
-  1) all_crops_state_assignments.png   - heatmap with crop colorbar
-  2) all_crops_feature_distributions.png - per-state feature distributions
+  1) state_assignments.png              - heatmap with crop colorbar
+  2) feature_distributions.png          - per-state feature distributions
   3) {crop_id}/t_cell_state_assignments.npy - per-crop state arrays
+  4) state_counts.png                   - stacked area: state fractions over time per crop
+  5) learned_transition_matrix.png      - heatmap of the learned transition matrix
+  6) observed_transition_matrices.png   - per-crop observed transition matrices
 
 Usage (treeHMM_env):
     conda run -n treeHMM_env python fit_arhmm.py
@@ -42,6 +45,23 @@ num_lags = cfg["num_lags"]
 feature_names = cfg["emission_feature_names"]
 
 sys.path.insert(0, cfg["treehmm_dir"])
+
+# ---------------------------------------------------------------------------
+# Matplotlib styling (matches the original notebook)
+# ---------------------------------------------------------------------------
+SMALL_SIZE = 7
+MEDIUM_SIZE = 8
+BIGGER_SIZE = 10
+
+plt.rc('font', size=SMALL_SIZE)
+plt.rc('axes', titlesize=MEDIUM_SIZE)
+plt.rc('axes', labelsize=SMALL_SIZE)
+plt.rc('xtick', labelsize=SMALL_SIZE)
+plt.rc('ytick', labelsize=SMALL_SIZE)
+plt.rc('legend', fontsize=SMALL_SIZE)
+plt.rc('figure', titlesize=BIGGER_SIZE)
+plt.rcParams['svg.fonttype'] = 'none'
+plt.rcParams['pdf.use14corefonts'] = True
 
 
 # ============================================================
@@ -292,10 +312,6 @@ fitted_params, lps = arhmm.fit_em(
     is_new_root_mask=batched_root,
 )
 
-print("Fitted params:")
-print(fitted_params)
-
-
 # ============================================================
 # Step 6: Compute posterior and state assignments
 # ============================================================
@@ -356,12 +372,12 @@ cbar = plt.colorbar(im, ax=axes[1], ticks=range(num_states))
 cbar.set_label('State')
 
 fig.legend(handles=legend_elements, loc='lower center', ncol=3,
-           fontsize=8, title='Crop ID', bbox_to_anchor=(0.5, -0.05))
+           title='Crop ID', bbox_to_anchor=(0.5, -0.1))
 
 plt.tight_layout()
 os.makedirs(out_base_dir, exist_ok=True)
-plt.savefig(os.path.join(out_base_dir, 'all_crops_state_assignments.png'),
-            dpi=150, bbox_inches='tight')
+plt.savefig(os.path.join(out_base_dir, 'state_assignments.png'),
+            dpi=300, bbox_inches='tight')
 plt.close()
 print("Saved state assignments plot.")
 
@@ -397,8 +413,8 @@ for i, feat in enumerate(feature_names):
         axes[i].set_xlabel(feat.replace("_", " ").title())
     sns.despine(ax=axes[i])
 
-plt.savefig(os.path.join(out_base_dir, 'all_crops_feature_distributions.png'),
-            dpi=150, bbox_inches='tight')
+plt.savefig(os.path.join(out_base_dir, 'feature_distributions.png'),
+            dpi=300, bbox_inches='tight')
 plt.close()
 print("Saved feature distribution plot.")
 
@@ -420,5 +436,149 @@ for crop_idx, crop in enumerate(crop_ids):
     out_path = os.path.join(crop_dir, 't_cell_state_assignments.npy')
     np.save(out_path, crop_states)
     print(f"Saved {out_path} with shape {crop_states.shape}")
+
+
+# ============================================================
+# Output 4: Fraction of cells per state over time (per crop)
+# ============================================================
+print("\n" + "=" * 60)
+print("Output 4: State fraction over time (per crop)")
+print("=" * 60)
+
+state_colors = plt.cm.get_cmap('viridis', num_states)
+state_color_list = [state_colors(s) for s in range(num_states)]
+
+fig, axes = plt.subplots(2, 3, figsize=(9, 6), tight_layout=True)
+axes_flat = axes.flatten()
+
+for crop_idx, crop in enumerate(crop_ids):
+    ax = axes_flat[crop_idx]
+    cell_mask = crop_labels == crop_idx
+    # state_assignments: (T, num_cells), active_mask: (T, num_cells)
+    crop_states = np.array(state_assignments[:, cell_mask])     # (T, n_crop_cells)
+    crop_active = np.array(combined_data['active_mask'][:, cell_mask])  # (T, n_crop_cells)
+
+    T_len = crop_states.shape[0]
+    fractions = np.zeros((num_states, T_len))
+    for t in range(T_len):
+        active_at_t = crop_active[t]
+        n_active = active_at_t.sum()
+        if n_active == 0:
+            continue
+        states_at_t = crop_states[t, active_at_t]
+        for s in range(num_states):
+            fractions[s, t] = np.sum(states_at_t == s) / n_active
+
+    time_axis = np.arange(T_len)
+    ax.stackplot(time_axis, fractions, colors=state_color_list,
+                 labels=[f'State {s}' for s in range(num_states)])
+    ax.set_title(crop)
+    ax.set_ylim(0, 1)
+    if crop_idx >= 3:
+        ax.set_xlabel('Time')
+    if crop_idx % 3 == 0:
+        ax.set_ylabel('Fraction of cells')
+
+handles, labels = axes_flat[0].get_legend_handles_labels()
+fig.legend(handles, labels, loc='lower center', ncol=num_states,
+           bbox_to_anchor=(0.5, -0.02))
+plt.suptitle('Fraction of T cells per state over time')
+plt.savefig(os.path.join(out_base_dir, 'state_counts.png'),
+            dpi=300, bbox_inches='tight')
+plt.close()
+print("Saved state_counts.png")
+
+
+# ============================================================
+# Output 5: Learned transition matrix
+# ============================================================
+print("\n" + "=" * 60)
+print("Output 5: Learned transition matrix")
+print("=" * 60)
+
+# fitted_params.transitions.transition_matrix: (K, K) where row = state at t, col = state at t+1
+trans_matrix = np.array(fitted_params.transitions.transition_matrix)
+print(f"Transition matrix shape: {trans_matrix.shape}")
+
+fig, ax = plt.subplots(figsize=(3, 3))
+im = ax.imshow(trans_matrix, cmap='Blues', vmin=0, vmax=1)
+ax.set_xticks(range(num_states))
+ax.set_yticks(range(num_states))
+ax.set_xticklabels([f'State {s}' for s in range(num_states)])
+ax.set_yticklabels([f'State {s}' for s in range(num_states)])
+ax.set_xlabel('State at $t+1$')
+ax.set_ylabel('State at $t$')
+ax.set_title('Learned Transition Matrix')
+
+# Annotate cells with values
+for i in range(num_states):
+    for j in range(num_states):
+        val = trans_matrix[i, j]
+        text_color = 'white' if val > 0.5 else 'black'
+        ax.text(j, i, f'{val:.3f}', ha='center', va='center',
+                color=text_color)
+
+cbar = plt.colorbar(im, ax=ax)
+cbar.set_label('Transition probability')
+plt.tight_layout()
+plt.savefig(os.path.join(out_base_dir, 'learned_transition_matrix.png'),
+            dpi=300, bbox_inches='tight')
+plt.close()
+print("Saved learned_transition_matrix.png")
+
+
+# ============================================================
+# Output 6: Observed transition matrices (per crop)
+# ============================================================
+print("\n" + "=" * 60)
+print("Output 6: Observed transition matrices (per crop)")
+print("=" * 60)
+
+fig, axes = plt.subplots(2, 3, figsize=(9, 6), tight_layout=True)
+axes_flat = axes.flatten()
+
+for crop_idx, crop in enumerate(crop_ids):
+    ax = axes_flat[crop_idx]
+    cell_mask = crop_labels == crop_idx
+    crop_states = np.array(state_assignments[:, cell_mask])     # (T, n_crop_cells)
+    crop_active = np.array(combined_data['active_mask'][:, cell_mask])  # (T, n_crop_cells)
+
+    # Count transitions
+    obs_trans = np.zeros((num_states, num_states))
+    T_len = crop_states.shape[0]
+    n_cells = crop_states.shape[1]
+    for c in range(n_cells):
+        for t in range(T_len - 1):
+            if crop_active[t, c] and crop_active[t + 1, c]:
+                s_from = crop_states[t, c]
+                s_to = crop_states[t + 1, c]
+                obs_trans[s_from, s_to] += 1
+
+    # Normalise rows to get probabilities
+    row_sums = obs_trans.sum(axis=1, keepdims=True)
+    row_sums[row_sums == 0] = 1  # avoid division by zero
+    obs_trans_prob = obs_trans / row_sums
+
+    im = ax.imshow(obs_trans_prob, cmap='Blues', vmin=0, vmax=1)
+    ax.set_xticks(range(num_states))
+    ax.set_yticks(range(num_states))
+    ax.set_xticklabels([f'{s}' for s in range(num_states)])
+    ax.set_yticklabels([f'{s}' for s in range(num_states)])
+    ax.set_xlabel('State at $t+1$')
+    ax.set_ylabel('State at $t$')
+    ax.set_title(f'{crop}\nObserved Transition Matrix')
+
+    for i in range(num_states):
+        for j in range(num_states):
+            val = obs_trans_prob[i, j]
+            text_color = 'white' if val > 0.5 else 'black'
+            ax.text(j, i, f'{val:.3f}', ha='center', va='center',
+                    color=text_color)
+
+plt.savefig(os.path.join(out_base_dir, 'observed_transition_matrices.png'),
+            dpi=300, bbox_inches='tight')
+plt.close()
+print("Saved observed_transition_matrices.png")
+
 
 print("\nDone!")
