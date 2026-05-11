@@ -103,9 +103,7 @@ for crop in crop_ids:
                           'full_cell_type_dict.pkl'), "rb")
     )
 
-    # Remove the t=0 time frame (removed from emissions/state_assignments)
-    cvat_tracks = cvat_tracks[1:, ...]
-    raw_tiff = raw_tiff[1:, ...]
+    # NOTE: all frames are kept — AR warmup is reflected in state_assignments
     T = raw_tiff.shape[0]
 
     # 2. Separate tracks by cell type
@@ -153,19 +151,42 @@ for crop in crop_ids:
     )
     print(f"  state_assignments shape: {state_assignments.shape}")
 
+    # Determine each retained cell's first active frame (AR warmup frame)
+    first_active_frame = {}
+    for cell_id in t_cell_ids:
+        col = id_to_column_index[cell_id]
+        for t_idx in range(T):
+            if np.any(t_cell_tracks[t_idx] == cell_id):
+                first_active_frame[cell_id] = t_idx
+                break
+
     # 5. Build the spatial state-assignment overlay
-    state_assignment_tracks = np.zeros_like(t_cell_tracks)
+    # Use state+1 for valid states, -1 for warmup frames (rendered grey)
+    WARMUP_VAL = -1
+    state_assignment_tracks = np.zeros_like(t_cell_tracks, dtype=np.int32)
     for t_idx in range(t_cell_tracks.shape[0]):
         for cell_id in t_cell_ids:
             if cell_id == 0:
                 continue
+            if not np.any(t_cell_tracks[t_idx] == cell_id):
+                continue
             col = id_to_column_index[cell_id]
-            state = state_assignments[t_idx, col]
-            state_assignment_tracks[t_idx][t_cell_tracks[t_idx] == cell_id] = state + 1
+            if t_idx == first_active_frame.get(cell_id, -1):
+                # Warmup frame — mark with a special value
+                state_assignment_tracks[t_idx][t_cell_tracks[t_idx] == cell_id] = WARMUP_VAL
+            else:
+                state = state_assignments[t_idx, col]
+                state_assignment_tracks[t_idx][t_cell_tracks[t_idx] == cell_id] = state + 1
 
     # 6. Define per-frame plotting function and render video
-    cmap = create_fixed_colormap(state_assignments.max() + 1)
-    norm = create_fixed_norm(state_assignments.max() + 1)
+    num_states_found = int(state_assignments.max()) + 1
+    cmap = create_fixed_colormap(num_states_found)
+    norm = create_fixed_norm(num_states_found)
+
+    # Build a colourmap that also includes grey for warmup frames.
+    # state_assignment_tracks uses: 0 = background, -1 = warmup, 1..K = states
+    import matplotlib.colors as mcolors
+    warmup_color = (0.5, 0.5, 0.5, 1.0)  # grey
 
     def create_HMM_overlay_video(
         t,
@@ -177,6 +198,7 @@ for crop in crop_ids:
         _cmap=cmap,
         _norm=norm,
         _crop=crop,
+        _warmup_color=warmup_color,
     ):
         plt.imshow(_raw[t, ..., 1], cmap="gray")
 
@@ -195,12 +217,22 @@ for crop in crop_ids:
         cancer_frame = np.where(cancer_frame != 0, 1, 0)
         plt.imshow(cancer_frame, cmap='Reds', alpha=0.35)
 
-        plt.imshow(state_frame, cmap=_cmap, norm=_norm, alpha=0.35)
+        # Render warmup pixels in grey
+        warmup_mask = (state_frame == WARMUP_VAL).astype(float)
+        warmup_rgba = np.zeros((*warmup_mask.shape, 4))
+        warmup_rgba[warmup_mask == 1] = _warmup_color
+        warmup_rgba[..., 3] *= 0.45
+        plt.imshow(warmup_rgba)
+
+        # Render state-assigned pixels (values >= 1) with the fixed colormap
+        state_frame_masked = np.where(state_frame > 0, state_frame, 0)
+        plt.imshow(state_frame_masked, cmap=_cmap, norm=_norm, alpha=0.35)
 
         handles = [
             mpatches.Patch(color=_cmap(i), label=str(i - 1))
-            for i in range(1, _sa.max() + 2)
+            for i in range(1, num_states_found + 1)
         ]
+        handles.append(mpatches.Patch(color='grey', label='warmup'))
         handles.append(mpatches.Patch(color='darkred', label='cancer'))
         plt.legend(title='state', handles=handles, loc='upper left')
 

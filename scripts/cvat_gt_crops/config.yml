@@ -52,9 +52,9 @@ model_features:
 # ------------------------------------------------------------------
 # AR-HMM model parameters
 # ------------------------------------------------------------------
-num_states: 2
-min_t: 0          # minimum number of active frames to keep a cell
-num_lags: 0       # AR lag order
+num_states: 3
+min_t: 2          # minimum number of active frames to keep a cell (≥2 for AR warmup)
+num_lags: 1       # AR lag order
 
 # ------------------------------------------------------------------
 # Input data paths

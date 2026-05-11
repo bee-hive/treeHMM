@@ -149,8 +149,7 @@ for crop_idx, crop in enumerate(crop_ids):
         open(os.path.join(cvat_base_dir, well_id, crop, 'full_cell_type_dict.pkl'), "rb")
     )
 
-    # remove the t=0 time frame (removed from emissions too)
-    cvat_tracks = cvat_tracks[1:, ...]
+    # NOTE: all frames are kept — AR warmup is applied per-cell later
 
     type_tracks = {}
     for ct in ['cancer', 't_cell']:
@@ -183,11 +182,12 @@ for crop_idx, crop in enumerate(crop_ids):
         if len(active_frames) == 0:
             print(f"Warning: Cell ID {cid} (col {col}) is never active.")
             continue
+        # Set parent_indices for all active frames (self-parent, no divisions)
+        for t in active_frames:
+            parent_indices[t, col] = col
+        # Mark first active frame as root (warmup applied later in Step 4b)
         first_frame = active_frames[0]
         is_new_root_mask[first_frame, col] = True
-        parent_indices[first_frame, col] = col
-        for t in active_frames[1:]:
-            parent_indices[t, col] = col
 
     data["parent_indices"] = parent_indices
     data['active_mask'] = active_mask
@@ -303,6 +303,34 @@ crop_labels = crop_labels[kept_mask]
 
 print(f"After filtering: emissions shape = {emissions.shape}")
 print(f"Crop labels shape: {crop_labels.shape}")
+
+
+# ============================================================
+# Step 4b: Apply AR warmup (mark each cell's first active frame as inactive)
+# ============================================================
+print("\n" + "=" * 60)
+print("Step 4b: Applying AR warmup")
+print("=" * 60)
+
+active = combined_data['active_mask']
+root = combined_data['is_new_root_mask']
+num_cells_filtered = active.shape[1]
+
+for col in range(num_cells_filtered):
+    active_frames = np.where(active[:, col])[0]
+    if len(active_frames) < 2:
+        # Should not happen after min_t=2 filtering, but be safe
+        continue
+    first_frame = active_frames[0]
+    second_frame = active_frames[1]
+    # First active frame: keep emission data but exclude from state inference
+    active[first_frame, col] = False
+    root[first_frame, col] = False
+    # Second active frame: this is where the HMM chain starts
+    root[second_frame, col] = True
+
+print(f"Warmup applied to {num_cells_filtered} cells")
+print(f"Active mask sum before/after warmup: inferred time-points = {active.sum()}")
 
 
 # ============================================================

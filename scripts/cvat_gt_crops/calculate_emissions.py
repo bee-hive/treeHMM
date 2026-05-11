@@ -175,12 +175,9 @@ for crop in crop_ids:
     example_type_neighbors = t_cell_type_specific_neighbors_per_frame[crop]
     example_all_neighbors = t_cell_all_neighbors_per_frame[crop]
 
-    # Determine cell IDs from frames 1-49 (after dropping t=0) so that the
-    # column ordering matches fit_arhmm.py and create_overlay_videos.py,
-    # which also drop t=0 before building their cell-ID lists.  Cells that
-    # appear *only* at t=0 are excluded to prevent column-offset misalignment.
-    t_cell_tracks_post_t0 = example_t_cell_tracks[1:, ...]
-    t_cell_ids = np.unique(t_cell_tracks_post_t0[t_cell_tracks_post_t0 > 0])
+    # Determine cell IDs from all frames.  Cells appearing only at t=0
+    # will be filtered out by the min_t requirement in fit_arhmm.py.
+    t_cell_ids = np.unique(example_t_cell_tracks[example_t_cell_tracks > 0])
     id_to_col = {cell_id: idx for idx, cell_id in enumerate(t_cell_ids)}
 
     emissions_array = np.zeros((50, len(t_cell_ids), 3))
@@ -202,8 +199,9 @@ for crop in crop_ids:
                 emissions_array[frame, col, 1] = 1 if cancer_n > 0 else 0
                 emissions_array[frame, col, 2] = neighbors - cancer_n
 
-    # Drop t=0 frame (velocity undefined between t=-1 and t=0)
-    emissions_array = emissions_array[1:, ...]
+    # NOTE: All 50 frames are kept.  The AR warmup logic in fit_arhmm.py
+    # marks each cell's first active frame as inactive for inference while
+    # retaining its emission value as the AR input for the next frame.
     print(f"  {crop}: emissions_array.shape = {emissions_array.shape}")
 
     out_dir = os.path.join(out_base_dir, crop)

@@ -703,8 +703,10 @@ class tARHMM(LinearAutoregressiveHMM):
             )
             
             # 2. Apply Masks
-            # Input is 0 if: Division OR New Root OR Inactive
-            should_zero_out = is_div | is_root | (~is_active)
+            # Input is 0 if: Division OR Inactive
+            # Note: new roots are NOT zeroed out — their first active frame
+            # (marked inactive for inference) still provides a valid AR input.
+            should_zero_out = is_div | (~is_active)
             final_input = jnp.where(should_zero_out[:, None], 0.0, gathered_obs)
             return final_input
 
