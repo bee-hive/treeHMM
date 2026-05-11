@@ -35,6 +35,8 @@ crop_ids = cfg["crop_ids"]
 cvat_base_dir = cfg["cvat_base_dir"]
 out_base_dir = cfg["output_base_dir"]
 min_t = cfg["min_t"]
+num_lags = cfg["num_lags"]
+model_features = ', '.join(cfg["model_features"])
 video_fps = cfg["video_fps"]
 video_figsize = tuple(cfg["video_figsize"])
 
@@ -151,14 +153,14 @@ for crop in crop_ids:
     )
     print(f"  state_assignments shape: {state_assignments.shape}")
 
-    # Determine each retained cell's first active frame (AR warmup frame)
-    first_active_frame = {}
-    for cell_id in t_cell_ids:
-        col = id_to_column_index[cell_id]
-        for t_idx in range(T):
-            if np.any(t_cell_tracks[t_idx] == cell_id):
-                first_active_frame[cell_id] = t_idx
-                break
+    # Determine warmup frames (first `num_lags` active frames per cell)
+    warmup_frames = set()  # set of (t_idx, cell_id) tuples
+    if num_lags > 0:
+        for cell_id in t_cell_ids:
+            active_t = [t_idx for t_idx in range(T)
+                        if np.any(t_cell_tracks[t_idx] == cell_id)]
+            for i in range(min(num_lags, len(active_t))):
+                warmup_frames.add((active_t[i], cell_id))
 
     # 5. Build the spatial state-assignment overlay
     # Use state+1 for valid states, -1 for warmup frames (rendered grey)
@@ -171,7 +173,7 @@ for crop in crop_ids:
             if not np.any(t_cell_tracks[t_idx] == cell_id):
                 continue
             col = id_to_column_index[cell_id]
-            if t_idx == first_active_frame.get(cell_id, -1):
+            if (t_idx, cell_id) in warmup_frames:
                 # Warmup frame — mark with a special value
                 state_assignment_tracks[t_idx][t_cell_tracks[t_idx] == cell_id] = WARMUP_VAL
             else:
@@ -232,11 +234,12 @@ for crop in crop_ids:
             mpatches.Patch(color=_cmap(i), label=str(i - 1))
             for i in range(1, num_states_found + 1)
         ]
-        handles.append(mpatches.Patch(color='grey', label='warmup'))
+        if num_lags > 0:
+            handles.append(mpatches.Patch(color='grey', label='warmup'))
         handles.append(mpatches.Patch(color='darkred', label='cancer'))
         plt.legend(title='state', handles=handles, loc='upper left')
 
-        plt.title(f'Crop {_crop}, frame {t + 1}\nAR-HMM of T cell tracks')
+        plt.title(f'Crop {_crop}, frame {t + 1}\nT cell track AR-HMM states\nnum_lags: {num_lags}, features: {model_features}')
         plt.axis('off')
 
     video_dir = os.path.join(out_base_dir, crop)

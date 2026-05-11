@@ -45,16 +45,16 @@ emission_feature_names:
 # passed into the AR-HMM.  Must be a subset of emission_feature_names.
 # ------------------------------------------------------------------
 model_features:
-  # - velocity
+  - velocity
   - cancer_contact
   # - t_cell_neighbors
 
 # ------------------------------------------------------------------
 # AR-HMM model parameters
 # ------------------------------------------------------------------
-num_states: 3
-min_t: 2          # minimum number of active frames to keep a cell (≥2 for AR warmup)
-num_lags: 1       # AR lag order
+num_states: 2
+min_t: 2          # minimum active frames to keep a cell (must be > num_lags)
+num_lags: 0       # AR lag order. Set to 0 to disable AR (defaults to a Gaussian HMM).
 
 # ------------------------------------------------------------------
 # Input data paths

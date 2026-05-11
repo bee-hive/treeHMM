@@ -306,31 +306,34 @@ print(f"Crop labels shape: {crop_labels.shape}")
 
 
 # ============================================================
-# Step 4b: Apply AR warmup (mark each cell's first active frame as inactive)
+# Step 4b: Apply AR warmup (mask first `num_lags` frames per cell)
 # ============================================================
 print("\n" + "=" * 60)
 print("Step 4b: Applying AR warmup")
 print("=" * 60)
 
-active = combined_data['active_mask']
-root = combined_data['is_new_root_mask']
-num_cells_filtered = active.shape[1]
+if num_lags > 0:
+    active = combined_data['active_mask']
+    root = combined_data['is_new_root_mask']
+    num_cells_filtered = active.shape[1]
 
-for col in range(num_cells_filtered):
-    active_frames = np.where(active[:, col])[0]
-    if len(active_frames) < 2:
-        # Should not happen after min_t=2 filtering, but be safe
-        continue
-    first_frame = active_frames[0]
-    second_frame = active_frames[1]
-    # First active frame: keep emission data but exclude from state inference
-    active[first_frame, col] = False
-    root[first_frame, col] = False
-    # Second active frame: this is where the HMM chain starts
-    root[second_frame, col] = True
+    for col in range(num_cells_filtered):
+        active_frames = np.where(active[:, col])[0]
+        if len(active_frames) <= num_lags:
+            # Not enough frames for warmup + inference — shouldn't happen
+            # after min_t filtering, but be safe
+            continue
+        # Mask the first `num_lags` active frames as warmup
+        for i in range(num_lags):
+            active[active_frames[i], col] = False
+            root[active_frames[i], col] = False
+        # The HMM chain starts at the frame immediately after warmup
+        root[active_frames[num_lags], col] = True
 
-print(f"Warmup applied to {num_cells_filtered} cells")
-print(f"Active mask sum before/after warmup: inferred time-points = {active.sum()}")
+    print(f"Warmup of {num_lags} frame(s) applied to {num_cells_filtered} cells")
+    print(f"Inferred time-points (active_mask sum): {active.sum()}")
+else:
+    print("num_lags=0 — no warmup needed")
 
 
 # ============================================================
