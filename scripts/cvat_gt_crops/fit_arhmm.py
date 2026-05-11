@@ -10,6 +10,7 @@ Outputs (all under output_base_dir):
   4) state_counts.png                   - stacked area: state fractions over time per crop
   5) learned_transition_matrix.png      - heatmap of the learned transition matrix
   6) observed_transition_matrices.png   - per-crop observed transition matrices
+  7) cancer_contact_heatmap.png         - heatmap of cancer_contact feature values
 
 Usage (treeHMM_env):
     conda run -n treeHMM_env python fit_arhmm.py
@@ -322,7 +323,13 @@ key = jr.PRNGKey(0)
 params, props = arhmm.initialize(key=key)
 
 emissions_jnp = jnp.array(emissions)
-inputs = jnp.zeros_like(emissions_jnp)
+inputs = arhmm.compute_inputs(
+    emissions_jnp,
+    jnp.array(combined_data['parent_indices']),
+    jnp.array(combined_data['is_division_mask']),
+    jnp.array(combined_data['is_new_root_mask']),
+    jnp.array(combined_data['active_mask']),
+)
 
 batched_emissions = emissions_jnp[None, ...]
 batched_inputs = inputs[None, ...]
@@ -348,8 +355,16 @@ print("=" * 60)
 
 from models.tarhmm import tree_hmm_two_filter_smoother
 
+inputs_fwd = arhmm.compute_inputs(
+    emissions_jnp,
+    jnp.array(combined_data['parent_indices']),
+    jnp.array(combined_data['is_division_mask']),
+    jnp.array(combined_data['is_new_root_mask']),
+    jnp.array(combined_data['active_mask']),
+)
+
 input_fwd = arhmm._inference_args(
-    params, emissions_jnp, inputs,
+    fitted_params, emissions_jnp, inputs_fwd,
     combined_data['parent_indices'], combined_data['is_division_mask'],
     combined_data['active_mask'], combined_data['is_new_root_mask'],
 )
@@ -617,6 +632,72 @@ plt.savefig(os.path.join(out_base_dir, 'observed_transition_matrices.png'),
             dpi=300, bbox_inches='tight')
 plt.close()
 print("Saved observed_transition_matrices.png")
+
+
+# ============================================================
+# Output 7: Cancer-contact heatmap with crop colorbar
+# ============================================================
+print("\n" + "=" * 60)
+print("Output 7: Cancer-contact heatmap with crop colorbar")
+print("=" * 60)
+
+# Load the FULL emissions (all emission_feature_names) to access
+# cancer_contact regardless of which model_features were used for HMM.
+cancer_contact_idx = all_feature_names.index('cancer_contact')
+print(f"cancer_contact index in full emissions: {cancer_contact_idx}")
+
+full_emissions_list = []
+for crop in crop_ids:
+    e_full = np.load(os.path.join(out_base_dir, crop, 't_cell_emissions_array.npy'))
+    full_emissions_list.append(e_full)
+    print(f"Crop {crop}: full emissions shape = {e_full.shape}")
+
+full_emissions = np.concatenate(full_emissions_list, axis=1)
+print(f"Combined full emissions shape: {full_emissions.shape}")
+
+# Apply the same time-based cell filter that was applied earlier
+full_emissions_filtered = full_emissions[:, kept_indices, :]
+print(f"Filtered full emissions shape: {full_emissions_filtered.shape}")
+
+# Extract cancer_contact: shape (T, num_cells) -> transpose to (num_cells, T)
+cancer_contact_vals = full_emissions_filtered[:, :, cancer_contact_idx].T  # (num_cells, T)
+
+# Mask inactive cells with NaN
+active_mask_np = np.array(combined_data['active_mask']).T  # (num_cells, T)
+cancer_contact_masked = np.where(active_mask_np, cancer_contact_vals, np.nan)
+
+fig, axes = plt.subplots(
+    1, 2, figsize=(14, 8),
+    gridspec_kw={'width_ratios': [1, 30]}, sharey=True,
+)
+
+# Left panel: crop colour bar (identical to Output 1)
+crop_arr = np.array(crop_labels).reshape(-1, 1)
+axes[0].imshow(crop_arr, aspect='auto', interpolation='none',
+               cmap=crop_cmap, vmin=0, vmax=num_crops - 1, origin='upper')
+axes[0].set_xticks([])
+axes[0].set_ylabel('Cell')
+axes[0].set_title('Crop')
+
+legend_elements = [Patch(facecolor=crop_cmap(i), label=crop_ids[i])
+                   for i in range(num_crops)]
+
+# Right panel: cancer_contact heatmap
+im = axes[1].imshow(cancer_contact_masked, aspect='auto',
+                     interpolation='none', cmap='magma', origin='upper')
+axes[1].set_xlabel('Time')
+axes[1].set_title('Cancer Contact Feature Value - All Crops')
+cbar = plt.colorbar(im, ax=axes[1])
+cbar.set_label('Cancer Contact')
+
+fig.legend(handles=legend_elements, loc='lower center', ncol=3,
+           title='Crop ID', bbox_to_anchor=(0.5, -0.1))
+
+plt.tight_layout()
+plt.savefig(os.path.join(out_base_dir, 'cancer_contact_heatmap.png'),
+            dpi=300, bbox_inches='tight')
+plt.close()
+print("Saved cancer_contact_heatmap.png")
 
 
 print("\nDone!")

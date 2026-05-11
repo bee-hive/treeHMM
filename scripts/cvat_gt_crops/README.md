@@ -61,10 +61,14 @@ All outputs are written to `treeHMM/analysis/cvat_gt_crops/`:
 
 ```
 analysis/cvat_gt_crops/
-├── all_crops_state_assignments.png        # joint heatmap with crop colorbar
-├── all_crops_feature_distributions.png    # per-state feature violin/histograms
+├── state_assignments.png        # joint heatmap with crop colorbar
+├── state_counts.png             # stacked area: state fractions over time per crop
+├── feature_distributions.png    # per-state feature violin/histograms
+├── cancer_contact_heatmap.png   # heatmap of cancer_contact feature values
+├── learned_transition_matrix.png      # heatmap of the learned transition matrix
+├── observed_transition_matrices.png   # per-crop observed transition matrices
 ├── B4_t50t100y200y350x750x900/
-│   ├── t_cell_emissions_array.npy         # (T × N × 3) emission features
+│   ├── t_cell_emissions_array.npy         # (T × N × M) emission features
 │   ├── t_cell_emissions_names.txt         # feature name list
 │   ├── t_cell_state_assignments.npy       # (T × N) state assignments
 │   └── t_cell_HMM_overlay_video.mp4       # overlay video

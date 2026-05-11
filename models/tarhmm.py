@@ -434,12 +434,28 @@ class TreeARHMMEmissions(LinearAutoregressiveHMMEmissions):
         """
         # Case 1: If just one cell.. 
         if emissions.ndim == 2:
+            if self.num_lags == 0:
+                # Bias-only: skip weight @ input matmul
+                f = lambda emission: \
+                    vmap(lambda state: tfd.MultivariateNormalFullCovariance(
+                        params.biases[state], params.covs[state]
+                    ).log_prob(emission))(jnp.arange(self.num_states))
+                return vmap(f)(emissions)
             return super()._compute_conditional_logliks(params, emissions, inputs)
             
         # Case 2: Tree 3D Input (Time, Cells, Dim)
         # we flatten T and Cells into a single 'Batch' dimension
         T, C, D = emissions.shape
         flat_emissions = emissions.reshape(-1, D)
+
+        if self.num_lags == 0:
+            # Bias-only: skip weight @ input matmul (avoids reshape of 0-dim inputs)
+            f = lambda emission: \
+                vmap(lambda state: tfd.MultivariateNormalFullCovariance(
+                    params.biases[state], params.covs[state]
+                ).log_prob(emission))(jnp.arange(self.num_states))
+            flat_log_probs = vmap(f)(flat_emissions)
+            return flat_log_probs.reshape(T, C, -1)
         
         flat_inputs = None
         if inputs is not None:
@@ -700,7 +716,7 @@ class tARHMM(LinearAutoregressiveHMM):
             active_mask
         )
         if self.num_lags == 0:
-            inputs = jnp.zeros_like(inputs)
+            return jnp.zeros((num_timesteps, max_cells, 0))
         return inputs
     #TODO some day 
     def sample(self,
