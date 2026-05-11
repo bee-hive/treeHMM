@@ -205,4 +205,9 @@ for crop in crop_ids:
     os.makedirs(out_dir, exist_ok=True)
     np.save(os.path.join(out_dir, "t_cell_emissions_array.npy"), emissions_array)
 
+    # Save the feature name ordering alongside the array
+    names_path = os.path.join(out_dir, "t_cell_emissions_names.txt")
+    with open(names_path, "w") as fh:
+        fh.write("\n".join(FEATURE_NAMES) + "\n")
+
 print("\nDone!")

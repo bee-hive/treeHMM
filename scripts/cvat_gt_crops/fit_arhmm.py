@@ -42,7 +42,8 @@ out_base_dir = cfg["output_base_dir"]
 num_states = cfg["num_states"]
 min_t = cfg["min_t"]
 num_lags = cfg["num_lags"]
-feature_names = cfg["emission_feature_names"]
+all_feature_names = cfg["emission_feature_names"]
+model_features = cfg["model_features"]
 
 sys.path.insert(0, cfg["treehmm_dir"])
 
@@ -241,15 +242,41 @@ print(f"Combined active_mask shape: {combined_active.shape}")
 
 
 # ============================================================
-# Step 3: Load and concatenate emissions
+# Step 3: Load and concatenate emissions (subsetting to model_features)
 # ============================================================
 print("\n" + "=" * 60)
 print("Step 3: Loading pre-computed emissions for all crops")
 print("=" * 60)
 
+# Read the saved feature-name ordering from the first crop to determine
+# which column indices correspond to the requested model_features.
+names_path = os.path.join(out_base_dir, crop_ids[0], 't_cell_emissions_names.txt')
+if os.path.exists(names_path):
+    with open(names_path, 'r') as fh:
+        saved_feature_names = [line.strip() for line in fh if line.strip()]
+else:
+    # Fall back to the full list in config if the names file hasn't been
+    # generated yet (backwards-compatible).
+    saved_feature_names = list(all_feature_names)
+
+# Validate that every requested model feature exists in the saved array.
+for feat in model_features:
+    if feat not in saved_feature_names:
+        raise ValueError(
+            f"model_features entry '{feat}' not found in saved emission "
+            f"features {saved_feature_names}. Re-run calculate_emissions.py "
+            f"to include this feature."
+        )
+
+feature_indices = [saved_feature_names.index(f) for f in model_features]
+print(f"Subsetting emissions to model_features: {model_features}")
+print(f"  -> column indices: {feature_indices}")
+
 all_emissions = []
 for crop in crop_ids:
     e = np.load(os.path.join(out_base_dir, crop, 't_cell_emissions_array.npy'))
+    # Subset to the requested model features
+    e = e[:, :, feature_indices]
     all_emissions.append(e)
     print(f"Crop {crop}: emissions shape = {e.shape}")
 
@@ -392,25 +419,36 @@ print("=" * 60)
 states_flat = np.array(masked_state_assignments.T).flatten()
 emissions_flat = np.array(emissions.reshape(-1, emissions.shape[-1]))
 
-plot_type = ['violin', 'hist', 'hist']
-df = pd.DataFrame(emissions_flat, columns=feature_names)
+num_features = len(model_features)
+df = pd.DataFrame(emissions_flat, columns=model_features)
 df['state'] = states_flat
 df_clean = df.dropna(subset=['state']).copy()
 df_clean['state'] = df_clean['state'].astype(int)
 
-fig, axes = plt.subplots(1, 3, figsize=(9, 3), tight_layout=True)
-for i, feat in enumerate(feature_names):
-    if plot_type[i] == 'violin':
-        sns.violinplot(data=df_clean, x='state', y=feat, hue='state',
-                       ax=axes[i], palette='viridis', legend=False)
-        axes[i].set_ylabel(feat.replace("_", " ").title())
-        axes[i].set_xlabel('AR-HMM State')
-    elif plot_type[i] == 'hist':
+# Choose plot type per feature: continuous features get violin plots,
+# discrete / binary features get histograms.
+_discrete_features = {'cancer_contact', 't_cell_neighbors'}
+
+fig, axes = plt.subplots(
+    1, num_features,
+    figsize=(3 * num_features, 3),
+    tight_layout=True,
+    squeeze=False,
+)
+axes = axes.flatten()
+
+for i, feat in enumerate(model_features):
+    if feat in _discrete_features:
         sns.histplot(data=df_clean, x=feat, hue='state',
                      ax=axes[i], palette='viridis',
                      common_norm=False, stat='density', element='step',
                      discrete=True, legend=False)
         axes[i].set_xlabel(feat.replace("_", " ").title())
+    else:
+        sns.violinplot(data=df_clean, x='state', y=feat, hue='state',
+                       ax=axes[i], palette='viridis', legend=False)
+        axes[i].set_ylabel(feat.replace("_", " ").title())
+        axes[i].set_xlabel('AR-HMM State')
     sns.despine(ax=axes[i])
 
 plt.savefig(os.path.join(out_base_dir, 'feature_distributions.png'),

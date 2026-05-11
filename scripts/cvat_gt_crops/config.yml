@@ -32,7 +32,8 @@ conditions_dict:
     - B8_t250t300y200y350x750x900
 
 # ------------------------------------------------------------------
-# Emission feature names (axis-2 of the emissions array)
+# Emission feature names (axis-2 of the emissions array, as computed
+# by calculate_emissions.py).  All listed features are always saved.
 # ------------------------------------------------------------------
 emission_feature_names:
   - velocity
@@ -40,9 +41,18 @@ emission_feature_names:
   - t_cell_neighbors
 
 # ------------------------------------------------------------------
+# Model features: subset of emission_feature_names that are actually
+# passed into the AR-HMM.  Must be a subset of emission_feature_names.
+# ------------------------------------------------------------------
+model_features:
+  # - velocity
+  - cancer_contact
+  # - t_cell_neighbors
+
+# ------------------------------------------------------------------
 # AR-HMM model parameters
 # ------------------------------------------------------------------
-num_states: 3
+num_states: 2
 min_t: 0          # minimum number of active frames to keep a cell
 num_lags: 1       # AR lag order
 

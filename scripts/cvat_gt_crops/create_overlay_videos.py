@@ -205,6 +205,7 @@ for crop in crop_ids:
         plt.legend(title='state', handles=handles, loc='upper left')
 
         plt.title(f'Crop {_crop}, frame {t + 1}\nAR-HMM of T cell tracks')
+        plt.axis('off')
 
     video_dir = os.path.join(out_base_dir, crop)
     os.makedirs(video_dir, exist_ok=True)
