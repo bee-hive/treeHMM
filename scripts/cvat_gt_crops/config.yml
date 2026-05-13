@@ -2,9 +2,9 @@
 # Configuration for CVAT ground-truth crop analysis pipeline
 # ============================================================
 # This config is shared across all three pipeline steps:
-#   1. calculate_emissions.py   (AnalysisEnv)
+#   1. calculate_emissions.py   (occident)
 #   2. fit_arhmm.py             (treeHMM_env)
-#   3. create_overlay_videos.py (AnalysisEnv)
+#   3. create_overlay_videos.py (occident)
 
 # ------------------------------------------------------------------
 # Crop identifiers
@@ -52,7 +52,7 @@ model_features:
 # ------------------------------------------------------------------
 # AR-HMM model parameters
 # ------------------------------------------------------------------
-num_states: 2
+num_states: 3
 min_t: 2          # minimum active frames to keep a cell (must be > num_lags)
 num_lags: 0       # AR lag order. Set to 0 to disable AR (defaults to a Gaussian HMM).
 
@@ -75,7 +75,7 @@ treehmm_dir: /gladstone/engelhardt/lab/adamw/treeHMM
 # Output base directory
 # Per-crop outputs are written to: {output_base_dir}/{crop_id}/
 # ------------------------------------------------------------------
-output_base_dir: /gladstone/engelhardt/lab/adamw/treeHMM/analysis/cvat_gt_crops
+output_base_dir: /gladstone/engelhardt/lab/adamw/treeHMM/analysis/cvat_gt_crops_hmm_k3_m2
 
 # ------------------------------------------------------------------
 # Video rendering settings

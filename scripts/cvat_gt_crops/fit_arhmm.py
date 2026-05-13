@@ -306,34 +306,33 @@ print(f"Crop labels shape: {crop_labels.shape}")
 
 
 # ============================================================
-# Step 4b: Apply AR warmup (mask first `num_lags` frames per cell)
+# Step 4b: Apply AR warmup (mask first `max(1, num_lags)` frames per cell)
 # ============================================================
 print("\n" + "=" * 60)
 print("Step 4b: Applying AR warmup")
 print("=" * 60)
 
-if num_lags > 0:
-    active = combined_data['active_mask']
-    root = combined_data['is_new_root_mask']
-    num_cells_filtered = active.shape[1]
+warmup_frames = max([1, num_lags])
 
-    for col in range(num_cells_filtered):
-        active_frames = np.where(active[:, col])[0]
-        if len(active_frames) <= num_lags:
-            # Not enough frames for warmup + inference — shouldn't happen
-            # after min_t filtering, but be safe
-            continue
-        # Mask the first `num_lags` active frames as warmup
-        for i in range(num_lags):
-            active[active_frames[i], col] = False
-            root[active_frames[i], col] = False
-        # The HMM chain starts at the frame immediately after warmup
-        root[active_frames[num_lags], col] = True
+active = combined_data['active_mask']
+root = combined_data['is_new_root_mask']
+num_cells_filtered = active.shape[1]
 
-    print(f"Warmup of {num_lags} frame(s) applied to {num_cells_filtered} cells")
-    print(f"Inferred time-points (active_mask sum): {active.sum()}")
-else:
-    print("num_lags=0 — no warmup needed")
+for col in range(num_cells_filtered):
+    active_frames = np.where(active[:, col])[0]
+    if len(active_frames) <= warmup_frames:
+        # Not enough frames for warmup + inference — shouldn't happen
+        # after min_t filtering, but be safe
+        continue
+    # Mask the first `warmup_frames` active frames as warmup
+    for i in range(warmup_frames):
+        active[active_frames[i], col] = False
+        root[active_frames[i], col] = False
+    # The HMM chain starts at the frame immediately after warmup
+    root[active_frames[warmup_frames], col] = True
+
+print(f"Warmup of {warmup_frames} frame(s) applied to {num_cells_filtered} cells")
+print(f"Inferred time-points (active_mask sum): {active.sum()}")
 
 
 # ============================================================

@@ -155,12 +155,11 @@ for crop in crop_ids:
 
     # Determine warmup frames (first `num_lags` active frames per cell)
     warmup_frames = set()  # set of (t_idx, cell_id) tuples
-    if num_lags > 0:
-        for cell_id in t_cell_ids:
-            active_t = [t_idx for t_idx in range(T)
-                        if np.any(t_cell_tracks[t_idx] == cell_id)]
-            for i in range(min(num_lags, len(active_t))):
-                warmup_frames.add((active_t[i], cell_id))
+    for cell_id in t_cell_ids:
+        active_t = [t_idx for t_idx in range(T)
+                    if np.any(t_cell_tracks[t_idx] == cell_id)]
+        for i in range(min(num_lags, len(active_t))):
+            warmup_frames.add((active_t[i], cell_id))
 
     # 5. Build the spatial state-assignment overlay
     # Use state+1 for valid states, -1 for warmup frames (rendered grey)
@@ -234,8 +233,7 @@ for crop in crop_ids:
             mpatches.Patch(color=_cmap(i), label=str(i - 1))
             for i in range(1, num_states_found + 1)
         ]
-        if num_lags > 0:
-            handles.append(mpatches.Patch(color='grey', label='warmup'))
+        handles.append(mpatches.Patch(color='grey', label='warmup'))
         handles.append(mpatches.Patch(color='darkred', label='cancer'))
         plt.legend(title='state', handles=handles, loc='upper left')
 
