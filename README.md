@@ -89,3 +89,21 @@ Fit using EM-- see the **Derivation** folder for forward–backward details.
 ---
 
 See the notebook for usage.
+
+## Environment requirements
+Follow these steps exactly to create a working `treeHMM_env` conda environment. 
+
+```
+conda install pip
+pip install matplotlib
+pip install seaborn
+pip install jupyter
+pip install tifffile
+pip install https://storage.googleapis.com/jax-releases/nocuda/jaxlib-0.4.35-cp312-cp312-manylinux2014_x86_64.whl
+pip install dynamax "jax==0.4.35" "jaxlib==0.4.35" "numpy<2.1"
+```
+
+Use this diagnostic line to confirm that your install is correct:
+```
+hasattr(jax.interpreters.xla, 'pytype_aval_mappings')
+```
