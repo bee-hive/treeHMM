@@ -11,25 +11,20 @@
 # ------------------------------------------------------------------
 crop_ids:
   - B4_t50t100y200y350x750x900
-  - B8_t50t100y200y350x750x900
   - E4_t50t100y200y350x750x900
-  - B4_t250t300y200y350x750x900
-  - B8_t250t300y200y350x750x900
-  - E4_t250t300y200y350x750x900
+  - B8_t50t100y200y350x750x900
 
 # ------------------------------------------------------------------
 # Experimental conditions mapped to crop IDs
+# (validation run: one example crop per condition)
 # ------------------------------------------------------------------
 conditions_dict:
   SH:
     - B4_t50t100y200y350x750x900
-    - B4_t250t300y200y350x750x900
   RASA2:
     - E4_t50t100y200y350x750x900
-    - E4_t250t300y200y350x750x900
   CUL5:
     - B8_t50t100y200y350x750x900
-    - B8_t250t300y200y350x750x900
 
 # ------------------------------------------------------------------
 # Emission feature names (axis-2 of the emissions array, as computed
@@ -52,7 +47,7 @@ model_features:
 # ------------------------------------------------------------------
 # AR-HMM model parameters
 # ------------------------------------------------------------------
-num_states: 3
+num_states: 2
 min_t: 2          # minimum active frames to keep a cell (must be > num_lags)
 num_lags: 0       # AR lag order. Set to 0 to disable AR (defaults to a Gaussian HMM).
 
@@ -69,13 +64,13 @@ experiment_config_path: /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/Marso
 imaging_pipeline_dir: /gladstone/engelhardt/lab/adamw/MarsonImagingPipeline
 
 # treeHMM repo root (added to sys.path for model imports)
-treehmm_dir: /gladstone/engelhardt/lab/adamw/treeHMM
+treehmm_dir: /gladstone/engelhardt/lab/jadjasu/treeHMM_temp
 
 # ------------------------------------------------------------------
 # Output base directory
 # Per-crop outputs are written to: {output_base_dir}/{crop_id}/
 # ------------------------------------------------------------------
-output_base_dir: /gladstone/engelhardt/lab/adamw/treeHMM/analysis/cvat_gt_crops_hmm_k3_m2
+output_base_dir: /gladstone/engelhardt/lab/jadjasu/treeHMM/analysis/cvat_gt_crops_hmm_k2_m2
 
 # ------------------------------------------------------------------
 # Video rendering settings

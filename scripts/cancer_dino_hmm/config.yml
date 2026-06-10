@@ -1,0 +1,117 @@
+# ============================================================
+# Configuration for cancer-cell DINOv2 tree-AR-HMM pipeline
+# ============================================================
+# Shared across all pipeline steps:
+#   0. regen_type_sep_tracks.py     (occident)
+#   1. calculate_cancer_emissions.py(occident)
+#   2. compute_dino_embeddings.py   (cs229Dino)  -- self-contained
+#   3. reduce_dino_pca.py           (cs229Dino)
+#   4. fit_cancer_arhmm.py          (treeHMM_env)
+#   5. create_cancer_overlay_videos.py (occident)
+#
+# Cancer cells are taken DIRECTLY from the Caliban ground-truth nuclei
+# tracks (each nucleus track == one cancer cell). CVAT tracks are used
+# only for T cells (regenerated, type-separated; channel 0 = T cell).
+
+# ------------------------------------------------------------------
+# Crop identifiers
+# ------------------------------------------------------------------
+crop_ids:
+  - B4_t50t100y200y350x750x900
+  - B8_t50t100y200y350x750x900
+  - E4_t50t100y200y350x750x900
+  - B4_t250t300y200y350x750x900
+  - B8_t250t300y200y350x750x900
+  - E4_t250t300y200y350x750x900
+
+# ------------------------------------------------------------------
+# Experimental conditions mapped to crop IDs
+# ------------------------------------------------------------------
+conditions_dict:
+  SH:
+    - B4_t50t100y200y350x750x900
+    - B4_t250t300y200y350x750x900
+  RASA2:
+    - E4_t50t100y200y350x750x900
+    - E4_t250t300y200y350x750x900
+  CUL5:
+    - B8_t50t100y200y350x750x900
+    - B8_t250t300y200y350x750x900
+
+# ------------------------------------------------------------------
+# Emission feature names (non-DINO scalar features, axis-2 of the
+# emissions array as computed by calculate_cancer_emissions.py).
+# ------------------------------------------------------------------
+emission_feature_names:
+  - velocity              # cancer-nucleus velocity
+  - t_cell_neighbors_20px # number of T cells within radius_px of the cancer nucleus
+
+# Subset of emission_feature_names actually fed to the model.
+model_features:
+  - velocity
+  - t_cell_neighbors_20px
+
+# ------------------------------------------------------------------
+# DINOv2 image-embedding settings
+# ------------------------------------------------------------------
+use_dino: true            # if false, emission_dim = len(model_features)
+dino_model_id: facebook/dinov2-base
+dino_model_path: /gladstone/engelhardt/home/jadjasu/.cache/huggingface/hub/models--facebook--dinov2-base
+n_dino_pcs: 10            # top-N principal components of the 768-d embedding
+dino_patch_px: 25         # side length of the RGB crop centered on the nucleus
+dino_rgb_alpha: 0.3       # alpha for the inline get_RGB_image_with_nuclei copy
+dino_batch_size: 256      # patches per DINOv2 forward batch
+
+# T-cell neighbor radius (centroid-to-centroid Euclidean, pixels)
+radius_px: 20
+
+# ------------------------------------------------------------------
+# AR-HMM model parameters
+# ------------------------------------------------------------------
+num_states: 2
+min_t: 2                  # minimum active frames to keep a cell (must be > num_lags)
+num_lags: 0               # AR lag order. 0 = Gaussian HMM (no AR). Only 0 or 1 supported.
+allow_divisions: false    # default: no division tree (self-parents)
+standardize_nondino: true # z-score velocity & t_cell_neighbors_20px before fitting
+
+# ------------------------------------------------------------------
+# Input data paths
+# ------------------------------------------------------------------
+cvat_base_dir: /gladstone/engelhardt/lab/adamw/MarsonImagingPipeline/data/ground_truth_tracking_annotations/cvat_annotations/TCR-T/
+caliban_base_dir: /gladstone/engelhardt/lab/MarsonLabIncucyteData/groundTruthCalibanTracks/
+
+# Registered per-well videos (T, H, W, C); channel 0 = RFP nuclei, 1 = phase.
+# path = {registration_base_dir}/{well}/registered.tiff
+registration_base_dir: /gladstone/engelhardt/lab/MarsonLabIncucyteData/SnakemakeRuns/Registration/output
+
+# External experiment config (used for TIME_FACTOR, etc.)
+experiment_config_path: /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/MarsonImagingPipeline/snakemake_configs/experiment.yml
+
+# MarsonImagingPipeline repo root (StatUtils / CellTypingUtils / PlottingUtils imports)
+imaging_pipeline_dir: /gladstone/engelhardt/lab/adamw/MarsonImagingPipeline
+
+# treeHMM repo root (added to sys.path for model imports)
+treehmm_dir: /gladstone/engelhardt/lab/jadjasu/treeHMM_temp
+
+# ------------------------------------------------------------------
+# Type-separated track regeneration (Step 0)
+# ------------------------------------------------------------------
+# In-repo output dir for regenerated tracks.tiff/cancer_ids.pkl/graph.pkl
+# (absolute path; per-crop subdirs created underneath).
+type_sep_tracks_dir: /gladstone/engelhardt/lab/jadjasu/treeHMM_temp/scripts/cancer_dino_hmm/type_sep_tracks
+# Repo containing parseXMLgt.py + scripts.utils.XMLutils (needs to be on PYTHONPATH).
+parsexml_repo: /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/MarsonImagingPipeline
+parsexml_thresh: 0.7      # passed to parseXMLgt.py --thresh
+# image_height/width are derived per-crop from the crop_id (e.g. 150x150).
+
+# ------------------------------------------------------------------
+# Output base directory
+# Per-crop outputs are written to: {output_base_dir}/{crop_id}/
+# ------------------------------------------------------------------
+output_base_dir: /gladstone/engelhardt/lab/jadjasu/treeHMM/analysis/cancer_dino_hmm_k2_dino10
+
+# ------------------------------------------------------------------
+# Video rendering settings
+# ------------------------------------------------------------------
+video_fps: 2
+video_figsize: [6, 6]
