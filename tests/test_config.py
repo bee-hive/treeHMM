@@ -226,7 +226,10 @@ class DerivedViews(unittest.TestCase):
 
 class CacheKeys(unittest.TestCase):
     def setUp(self):
+        # Extras are pinned off rather than inherited, so these expectations do
+        # not drift when configs/_smoke.yml changes what it asks for.
         self.cfg = C.load_config(SMOKE)
+        self.cfg["outputs"]["extras"] = []
 
     @staticmethod
     def keys(cfg):
@@ -241,7 +244,15 @@ class CacheKeys(unittest.TestCase):
         return [n for n in before if after[n] != before[n]]
 
     def test_keys_are_stable_across_invocations(self):
-        self.assertEqual(self.keys(self.cfg), self.keys(C.load_config(SMOKE)))
+        self.assertEqual(self.keys(C.load_config(SMOKE)), self.keys(C.load_config(SMOKE)))
+
+    def test_requesting_extras_does_not_change_any_upstream_key(self):
+        without = self.keys(self.cfg)
+        with_extras = copy.deepcopy(self.cfg)
+        with_extras["outputs"]["extras"] = ["state_timeline", "condition_stats"]
+        after = self.keys(with_extras)
+        for step in without:
+            self.assertEqual(after[step], without[step], step)
 
     def test_dino_steps_active_only_when_the_model_uses_them(self):
         self.assertEqual([s.name for s in L.active_steps(self.cfg)],
@@ -253,6 +264,25 @@ class CacheKeys(unittest.TestCase):
 
     def test_extras_step_active_only_when_requested(self):
         self.assertNotIn("extras", [s.name for s in L.active_steps(self.cfg)])
+        with_extras = copy.deepcopy(self.cfg)
+        with_extras["outputs"]["extras"] = ["state_timeline"]
+        self.assertEqual([s.name for s in L.active_steps(with_extras)],
+                         ["features", "fit", "outputs", "extras"])
+
+    def test_extras_are_last_in_the_key_chain(self):
+        """Changing what extras run must not invalidate anything upstream."""
+        with_extras = copy.deepcopy(self.cfg)
+        with_extras["outputs"]["extras"] = ["state_timeline"]
+        self.assertEqual(
+            self.changed(lambda c: c["outputs"].update(extras=["condition_stats"]),
+                         base=with_extras),
+            ["extras"],
+        )
+
+    def test_the_shipped_smoke_config_resolves_its_extras(self):
+        """The regression config must name extras that exist and are satisfiable."""
+        shipped = C.load_config(SMOKE)
+        self.assertEqual(shipped["outputs"]["extras"], ["state_timeline", "condition_stats"])
 
     def test_invalidation_is_scoped(self):
         cases = [
