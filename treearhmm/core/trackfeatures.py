@@ -475,9 +475,15 @@ def _win_std_displacement(sb: SeriesBundle) -> np.ndarray:
 
 def _nanstd_window(sb: SeriesBundle, series: np.ndarray) -> np.ndarray:
     """Trailing NaN-aware standard deviation; NaN until two values are available."""
+    import warnings
+
     windowed = sb.window(series, int(sb.params["window_frames"]))
     counts = np.sum(~np.isnan(windowed), axis=-1)
-    with np.errstate(invalid="ignore"):
+    with warnings.catch_warnings(), np.errstate(invalid="ignore"):
+        # Windows with fewer than two values are expected early in a cell's
+        # life and are masked out below; numpy's "degrees of freedom <= 0"
+        # warning for them is noise, not a signal.
+        warnings.simplefilter("ignore", RuntimeWarning)
         std = np.nanstd(windowed, axis=-1)
     return np.where(counts >= 2, std, np.nan)
 
