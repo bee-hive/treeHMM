@@ -23,5 +23,4 @@ model:
   em_seeds: [0]
 
 outputs:
-  # Restored to [state_timeline, condition_stats] once those extras exist.
-  extras: []
+  extras: [state_timeline, condition_stats]
