@@ -139,6 +139,17 @@ def run_step(cfg: dict, layout: layoutmod.Layout, step: layoutmod.Step, force: b
         # Keep JAX from grabbing the whole card, so a stray notebook on the same
         # GPU does not turn a fit into an OOM.
         child_env.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+        # Bit-exact reruns.  Without these, two runs of the same fit on the same
+        # inputs differ in the last few digits of the log probability: XLA
+        # autotunes its kernels per process and picks different reduction orders,
+        # and float32 accumulation is not associative.  State assignments were
+        # stable regardless, but a log probability that moves under a rerun is
+        # not something anyone should have to reason about.  Measured: autotuning
+        # is what matters here; deterministic_ops alone does not settle it.
+        child_env.setdefault(
+            "XLA_FLAGS",
+            "--xla_gpu_deterministic_ops=true --xla_gpu_autotune_level=0",
+        )
 
     command = [
         "conda", "run", "--no-capture-output", "-n", env_name,

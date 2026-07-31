@@ -174,6 +174,17 @@ validation imports the module just to read `REQUIRES`.
   make every edit invalidate everything and train you to reach for `--force`.
   Each step carries a hand-bumped `version` instead, and `manifest.yml` records
   the git commit so a stale cache is detectable.
+- **What "deterministic" means here, precisely.** Every scientific output --
+  state assignments, posteriors, and therefore all four base outputs -- is
+  bit-reproducible across reruns and across a full cache wipe. The *log
+  probability* additionally needs
+  `XLA_FLAGS=--xla_gpu_deterministic_ops=true --xla_gpu_autotune_level=0`, which
+  the CLI sets for the model step: without it XLA autotunes its kernels per
+  process, picks different reduction orders, and float32 addition is not
+  associative, so `log_prob_final` drifts in its last few digits. That drift
+  never moved a state assignment, but a number that changes under a rerun is not
+  worth having to reason about. Running the fit by hand without those flags is
+  fine for everything except comparing log probabilities digit for digit.
 - Writes are atomic. A killed step leaves the previous artifact or nothing,
   never a truncated file a later run happily loads.
 
