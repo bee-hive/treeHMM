@@ -374,25 +374,36 @@ class Layout:
         directory = self.step_dir(name)
         if not directory.is_dir():
             return False
-        for produced in stamp.get("produced", []):
+        # Checked against what THIS config declares, not against the list the
+        # stamp happens to record: an older stamp may predate a step learning to
+        # report what it produces, and trusting it would skip the check silently.
+        for produced in declared_outputs(name, self.cfg):
             if not (directory / produced).exists():
                 return False
         return True
 
     def status(self) -> list[dict]:
-        """One row per active step describing whether it would run, and why."""
+        """One row per active step describing whether it would run, and why.
+
+        Each step is judged on its own key and artifacts, with no cascade.  A
+        real upstream change already propagates, because keys chain -- so a step
+        reported as current here really will be skipped.  Cascading would
+        additionally mark a step stale when an upstream one merely lost its
+        stamp (a killed process, a hand-deleted file) without its key changing,
+        which is exactly the case where the downstream output is still valid,
+        and it made `status` disagree with what `run` then did.
+        """
         rows = []
-        stale_upstream = False
         for step in active_steps(self.cfg):
-            current = self.is_current(step.name) and not stale_upstream
+            current = self.is_current(step.name)
             if current:
                 reason = "cached"
-            elif stale_upstream:
-                reason = "upstream step will rerun"
             elif self.read_stamp(step.name) is None:
                 reason = "never run"
+            elif self.read_stamp(step.name).get("key") != step_key(self.cfg, step.name):
+                reason = "inputs changed"
             else:
-                reason = "config changed"
+                reason = "output missing"
             rows.append(
                 {
                     "step": step.name,
@@ -403,7 +414,6 @@ class Layout:
                     "reason": reason,
                 }
             )
-            stale_upstream = stale_upstream or not current
         return rows
 
 
