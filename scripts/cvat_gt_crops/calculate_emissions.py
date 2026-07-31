@@ -46,6 +46,7 @@ from scripts.utils.StatUtils import (
     compute_cell_velocities_per_frame_dict,
     compute_cell_cell_neighbor_dict,
     compute_all_cell_cell_neighbor_dict,
+    calculate_centroids_per_frame_dict,
 )
 from scripts.utils.CellTypingUtils import filter_tracks
 
@@ -204,9 +205,23 @@ for crop in crop_ids:
     # retaining its emission value as the AR input for the next frame.
     print(f"  {crop}: emissions_array.shape = {emissions_array.shape}")
 
+    # Per-cell centroids (T, N, 2) crop-local (y, x), NaN where the cell is
+    # absent.  Column order matches emissions_array / id_to_col (and the
+    # sorted-unique ordering used in fit_arhmm.py), so the DINOv2 step can
+    # extract patches aligned to the emission columns.
+    T = emissions_array.shape[0]
+    centroids_dict = calculate_centroids_per_frame_dict(example_t_cell_tracks)
+    t_cell_centroids = np.full((T, len(t_cell_ids), 2), np.nan, dtype=float)
+    for t, id_to_yx in centroids_dict.items():
+        for cid, (y, x) in id_to_yx.items():
+            if cid in id_to_col:
+                t_cell_centroids[t, id_to_col[cid]] = (y, x)
+
     out_dir = os.path.join(out_base_dir, crop)
     os.makedirs(out_dir, exist_ok=True)
     np.save(os.path.join(out_dir, "t_cell_emissions_array.npy"), emissions_array)
+    np.save(os.path.join(out_dir, "t_cell_cell_ids.npy"), np.asarray(t_cell_ids))
+    np.save(os.path.join(out_dir, "t_cell_centroids.npy"), t_cell_centroids)
 
     # Save the feature name ordering alongside the array
     names_path = os.path.join(out_dir, "t_cell_emissions_names.txt")

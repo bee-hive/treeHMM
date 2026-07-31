@@ -1,0 +1,27 @@
+# Fast end-to-end check: one crop, no appearance embedding, few EM iterations.
+#
+# Not a scientific run -- it exists so the whole pipeline can be exercised in
+# about a minute after a change.  This is the regression test.
+
+extends: default.yml
+
+run_name: _smoke
+description: One-crop smoke test of the pipeline.
+
+data:
+  crop_ids: [B4_t50t100y200y350x750x900]
+
+features:
+  compute: [area, circularity, velocity, t_cell_neighbors, d_area_frac]
+
+model:
+  features: [area, circularity, velocity]
+  use_dino_pcs: false
+  num_states: 3
+  num_lags: 1
+  num_em_iters: 15
+  em_seeds: [0]
+
+outputs:
+  # Restored to [state_timeline, condition_stats] once those extras exist.
+  extras: []

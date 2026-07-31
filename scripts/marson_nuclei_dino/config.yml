@@ -1,0 +1,144 @@
+# ============================================================
+# Configuration: DINOv2 HMM over Caliban cancer nuclei
+# Finetuned_Analysis_250t_600xy, 12 wells, 250 frames, 600x600
+# ============================================================
+# Goal: k=2 latent states separating ISOLATED cancer cells from
+# cells in AGGREGATES, driven purely by the appearance of a
+# 30x30 px patch centered on each nucleus.
+#
+# Shared across all pipeline steps:
+#   1. calculate_nuclei_emissions.py  (OccidentAnalysis)
+#   2. compute_dino_embeddings.py     (cs229Dino)
+#   3. reduce_dino_pca.py             (cs229Dino)
+#   4. fit_nuclei_hmm.py              (treeHMM_env)
+#   5. create_nuclei_overlay_videos.py(OccidentAnalysis)
+#
+# Cancer cells ARE the Caliban nuclei tracks -- SAM3 'cancer' tracks
+# are not used anywhere in this pipeline (they are known to be flawed;
+# the nuclei are the gold standard).
+
+# ------------------------------------------------------------------
+# Wells
+# ------------------------------------------------------------------
+wells:
+  - B3
+  - B4
+  - B5
+  - B6
+  - B7
+  - B8
+  - B9
+  - B10
+  - E3
+  - E4
+  - E5
+  - E6
+
+conditions_dict:
+  SH:    [B3, B4, B5, B6]
+  RASA2: [E3, E4, E5, E6]
+  CUL5:  [B7, B8, B9, B10]
+
+# ------------------------------------------------------------------
+# Scalar features computed in Step 1.
+#
+# IMPORTANT: with `model_features: []` NONE of these are fed to the
+# model -- the emissions are DINO PCs only.  They are computed and
+# saved purely as INDEPENDENT DIAGNOSTICS, so that "did the states
+# separate alone-vs-aggregate?" can be answered with data the model
+# never saw.  `nuclei_neighbors_30px` is the primary validator.
+# ------------------------------------------------------------------
+emission_feature_names:
+  - velocity                # um/min, straight from cell_data.parquet
+  - area                    # um^2,   straight from cell_data.parquet
+  - circularity             #         straight from cell_data.parquet
+  - nuclei_neighbors_30px   # other nuclei within 30 px of this centroid
+  - nuclei_neighbors_50px   # other nuclei within 50 px of this centroid
+  - nearest_nucleus_dist    # px to closest other nucleus (inf -> capped)
+  - t_cell_neighbors_20px   # SAM3 t_cell centroids within 20 px
+
+# Subset actually fed to the model.  Empty = DINO PCs only.
+model_features: []
+
+# Neighbor radii (pixels, centroid-to-centroid) for the diagnostics above.
+nuclei_neighbor_radii: [30, 50]
+t_cell_radius_px: 20
+# Value substituted for nearest_nucleus_dist when a frame has <2 nuclei.
+nearest_dist_cap_px: 600
+
+# ------------------------------------------------------------------
+# DINOv2 image-embedding settings
+# ------------------------------------------------------------------
+use_dino: true
+dino_model_id: facebook/dinov2-base
+dino_model_path: /gladstone/engelhardt/home/jadjasu/.cache/huggingface/hub/models--facebook--dinov2-base
+dino_patch_px: 30         # side length of the RGB patch centered on the nucleus
+dino_rgb_alpha: 0.3       # weight of the RFP nuclei channel in the RGB composite
+dino_batch_size: 256
+n_dino_pcs: 10            # top-N principal components of the 768-d embedding
+# Whiten the PCs (unit variance per component).  The unwhitened PC1 of DINOv2
+# embeddings carries far more variance than PC10, which makes the k-means
+# initialization essentially a 1-D split on PC1.  Whitening gives every kept
+# component equal say in the initialization.
+dino_pca_whiten: true
+
+# ------------------------------------------------------------------
+# HMM model parameters
+# ------------------------------------------------------------------
+num_states: 2
+num_lags: 0               # 0 = Gaussian HMM (no AR).  Only 0 or 1 supported.
+min_t: 10                 # minimum active frames to keep a nucleus track
+init_method: kmeans       # "kmeans" (uses emissions) or "prior"
+init_stickiness: 0.9      # diagonal of the initial transition matrix
+num_em_iters: 50
+em_seed: 0
+
+# Wire real division lineage from {well}_div.pkl into the tree.
+# Verified convention: div.frame IS the daughters' first active frame, and the
+# parent's last active frame is div.frame - 1.
+allow_divisions: true
+
+# AR warmup masks each cell's first active frame as inactive.  It exists only
+# to hide the artifactual velocity==0 on a cell's first frame; DINO embeddings
+# are perfectly valid on frame 1, so it is off by default here.  When enabled,
+# division-child columns are skipped so their division edge is not destroyed.
+ar_warmup: false
+
+standardize_nondino: true # z-score any model_features before fitting (no-op if empty)
+
+# ------------------------------------------------------------------
+# Input data paths
+# ------------------------------------------------------------------
+snakemake_runs_dir: /gladstone/engelhardt/lab/MarsonLabIncucyteData/SnakemakeRuns
+analysis_run: Finetuned_Analysis_250t_600xy   # supplies SimplePlotsV3/stats/{well}/
+caliban_run: Caliban_600xy                    # supplies {well}_div.pkl
+registration_run: Registration                # supplies {well}/registered.tiff
+
+# Geometry mapping 600x600 crop coordinates -> registered.tiff coordinates.
+# registered.tiff is (450, 1040, 1408, 2); the pipeline takes FRAME_START:FRAME_END
+# of the center VIDEO_CENTER_EXTRACT region, so:
+#   y_reg = y_crop + (1040 - 600)//2 = y_crop + 220
+#   x_reg = x_crop + (1408 - 600)//2 = x_crop + 404
+#   t_reg = t_crop + 50
+# These are derived at runtime from the values below, not hardcoded.
+raw_video_shape: [450, 1040, 1408, 2]
+video_center_extract: [600, 600]
+frame_start: 50
+frame_end: 300
+rfp_channel: 0
+phase_channel: 1
+
+# treeHMM repo root (added to sys.path for `from models.tarhmm import ...`)
+treehmm_dir: /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/treeHMM
+
+# ------------------------------------------------------------------
+# Output base directory.  Per-well outputs -> {output_base_dir}/{well}/
+# ------------------------------------------------------------------
+output_base_dir: /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/treeHMM/analysis/marson_nuclei_dino_k2_30px
+
+# ------------------------------------------------------------------
+# Video rendering
+# ------------------------------------------------------------------
+video_fps: 10
+video_figsize: [6, 6]
+video_wells: [B3]         # rendering all 12 is slow; restrict to a few

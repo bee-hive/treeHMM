@@ -3,11 +3,11 @@ Step 3: PCA-reduce the DINOv2 embeddings to the top-N principal components.
 
 One JOINT PCA is fit across all crops (so PCs are comparable across crops, like
 the jointly-fit HMM).  Only valid (real-patch) cell-frame embeddings are used to
-fit; invalid (absent-nucleus) entries are written as zeros in the output (matching
+fit; invalid (absent-cell) entries are written as zeros in the output (matching
 how the model pads inactive cells).
 
 Saved:
-  per crop:  {output_base_dir}/{crop}/cancer_dino_pca.npy      (T, N, n_dino_pcs)
+  per crop:  {output_base_dir}/{crop}/t_cell_dino_pca.npy     (T, N, n_dino_pcs)
   global:    {output_base_dir}/dino_pca_components.npy          (n_dino_pcs, 768)
              {output_base_dir}/dino_pca_explained_variance_ratio.npy (n_dino_pcs,)
              {output_base_dir}/dino_pca_mean.npy                (768,)
@@ -45,8 +45,8 @@ raws, valids = {}, {}
 valid_rows = []
 for crop in crop_ids:
     out_dir = os.path.join(out_base_dir, crop)
-    raw = np.load(os.path.join(out_dir, "cancer_dino_raw.npy"))          # (T, N, 768)
-    valid = np.load(os.path.join(out_dir, "cancer_dino_valid_mask.npy")) # (T, N)
+    raw = np.load(os.path.join(out_dir, "t_cell_dino_raw.npy"))          # (T, N, 768)
+    valid = np.load(os.path.join(out_dir, "t_cell_dino_valid_mask.npy")) # (T, N)
     raws[crop] = raw
     valids[crop] = valid
     valid_rows.append(raw[valid])  # (n_valid_crop, 768)
@@ -80,8 +80,8 @@ for crop in crop_ids:
         out = pcs.reshape(-1, n_components)
         out[flat_valid] = transformed
         pcs = out.reshape(T, N, n_components)
-    np.save(os.path.join(out_base_dir, crop, "cancer_dino_pca.npy"), pcs)
-    print(f"  {crop}: saved cancer_dino_pca.npy {pcs.shape}")
+    np.save(os.path.join(out_base_dir, crop, "t_cell_dino_pca.npy"), pcs)
+    print(f"  {crop}: saved t_cell_dino_pca.npy {pcs.shape}")
 
 # --- Save global PCA artifacts ---
 np.save(os.path.join(out_base_dir, "dino_pca_components.npy"), pca.components_)

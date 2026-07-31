@@ -1,0 +1,108 @@
+# Experiment-facing defaults.
+#
+# A run config extends this file and overrides only what it does differently.
+# Merge rule: mappings merge key by key, but every other type -- INCLUDING LISTS
+# -- is replaced wholesale.  So a run writing `model: {features: [area]}` gets
+# exactly `[area]`, not this file's list plus `area`.  That is what makes a
+# narrowing override predictable.  A value of `null` deletes an inherited key.
+
+extends: site.yml
+
+run_name: default
+description: Defaults only; not meant to be run directly.
+
+cells:
+  # phase  -- cancer cells are the ground-truth CVAT tracks named in
+  #           ALL_cancer_ids.pkl.  Masks cover the whole cell body, so shape
+  #           features describe the cell.
+  # nuclei -- the Caliban nuclei tracks.  A declared seam in core/cells.py;
+  #           not implemented, and rejected by config validation.
+  source: phase
+
+  # Drop cells observed for fewer than this many frames.  Short tracks are
+  # mostly fragments, and they dominate the state occupancy if kept.
+  min_frames: 10
+
+  # Leading frames per cell excluded from inference.  HELD FIXED regardless of
+  # model.num_lags, so a lag-0 and a lag-1 run are scored over exactly the same
+  # cell-frames and their log probabilities are comparable.  Must be >= 1: every
+  # temporal feature is undefined on a cell's first active frame.
+  warmup_frames: 1
+
+features:
+  # `all` computes the whole registry.  Computing everything once means every
+  # run in a sweep shares one features cache, and -- more importantly -- it
+  # gives the per-state distributions features the model never saw.  A state
+  # characterised only by its own inputs is a tautology; the held-out features
+  # are what make the description checkable.
+  #
+  # An explicit list is allowed, but it only narrows what is cached; it does not
+  # make anything faster to fit.
+  compute: all
+
+  params:
+    neighbor_radius_px: 20   # centroid-to-centroid radius for *_neighbors
+    dilate_radius_px: 2      # disk radius for dilated_t_cell_neighbors
+    window_frames: 5         # trailing window for the win_std_* features
+    # Whole-stack percentile scaling for intensity features.  Never per frame:
+    # a single bright artifact would rescale that frame and turn an intensity
+    # feature (and, downstream, a leading DINO PC) into a clock.
+    norm_percentiles: [1.0, 99.0]
+
+dino:
+  # Consulted only when model.use_dino_pcs is true.  There is no separate
+  # `dino.enabled`, so there is nothing that can disagree with the model config.
+  model_id: facebook/dinov2-base
+  model_path: /gladstone/engelhardt/home/jadjasu/.cache/huggingface/hub/models--facebook--dinov2-base
+
+  patch_px: 50               # square window around the rounded centroid, edge-padded
+  n_pcs: 10
+  whiten: true               # required in practice: unwhitened, PC1 dwarfs PC10 and
+                             # kmeans init degenerates to a 1-D split on PC1
+  batch_size: 256            # throughput only; deliberately not in the cache key
+
+  # The patch is greyscale phase with cell-type masks alpha-blended over it.
+  # Blending rather than flat-filling keeps the phase texture (blebbing, halo)
+  # visible inside the mask, which is most of what makes the embedding useful.
+  mask_alpha: 0.45
+  subject_colour: [1.0, 0.0, 0.0]        # the cell being embedded
+  other_cancer_colour: [0.0, 0.0, 1.0]   # other cancer cells in the patch
+  tcell_colour: [0.0, 1.0, 0.0]
+  include_rfp: false         # when true, RFP goes into luminance, not a hue:
+  rfp_alpha: 0.3             # all three hues are already spent on cell types
+  norm_percentiles: [1.0, 99.0]
+
+model:
+  # ORDERED.  This list, followed by the DINO PCs when use_dino_pcs is set, IS
+  # the emission vector and IS emission_names (tree_input.md section 3).
+  features: [area, circularity, velocity, t_cell_neighbors]
+
+  # D = len(model.features) + (dino.n_pcs if use_dino_pcs else 0)
+  use_dino_pcs: false
+
+  num_states: 3
+  num_lags: 1                # 0 (Gaussian HMM, bias only) or 1; the model
+                             # raises NotImplementedError above that
+  standardize: true          # z-score per dimension over ACTIVE cell-frames only
+  init_method: kmeans        # kmeans | prior | random
+  init_stickiness: 0.9       # diagonal mass of the initial transition matrix
+  num_em_iters: 50
+
+  # The ONLY randomness surface in the pipeline.  EM is run once per seed and
+  # the fit with the best final log probability is kept, ties broken by the
+  # lowest seed.  Everything else is a deterministic function of the resolved
+  # config plus the cached inputs.
+  em_seeds: [0, 1, 2]
+
+outputs:
+  video:
+    crops: all               # 'all' | 'none' | an explicit list of crop ids
+    fps: 2
+    figsize: [7, 7]
+    dpi: 160
+    label_cell_ids: true
+  feature_distributions:
+    kind: violin             # violin | box
+    max_cols: 4
+    include: all             # every cached feature, not just what the model saw
+  extras: []                 # module names under treearhmm/extras/

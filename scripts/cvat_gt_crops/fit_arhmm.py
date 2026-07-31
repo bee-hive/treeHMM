@@ -45,6 +45,8 @@ min_t = cfg["min_t"]
 num_lags = cfg["num_lags"]
 all_feature_names = cfg["emission_feature_names"]
 model_features = cfg["model_features"]
+use_dino = cfg.get("use_dino", False)
+standardize_nondino = cfg.get("standardize_nondino", False)
 
 sys.path.insert(0, cfg["treehmm_dir"])
 
@@ -273,16 +275,45 @@ feature_indices = [saved_feature_names.index(f) for f in model_features]
 print(f"Subsetting emissions to model_features: {model_features}")
 print(f"  -> column indices: {feature_indices}")
 
-all_emissions = []
+nondino_list, dino_list = [], []
 for crop in crop_ids:
     e = np.load(os.path.join(out_base_dir, crop, 't_cell_emissions_array.npy'))
     # Subset to the requested model features
     e = e[:, :, feature_indices]
-    all_emissions.append(e)
+    nondino_list.append(e)
+    if use_dino:
+        dino_list.append(np.load(os.path.join(out_base_dir, crop, 't_cell_dino_pca.npy')))
     print(f"Crop {crop}: emissions shape = {e.shape}")
 
-emissions = np.concatenate(all_emissions, axis=1)
-print(f"\nCombined emissions shape: {emissions.shape}")
+nondino = np.concatenate(nondino_list, axis=1).astype(float)  # (T, total, n_nondino)
+
+# --- z-score non-DINO features jointly over ACTIVE cell-frames ---
+# (uses the pre-time-filter active_mask from Step 2; emissions are filtered
+# together with the masks in Step 4 below, so the column axes stay aligned.)
+if standardize_nondino:
+    active = combined_data['active_mask']
+    flat = nondino[active]                       # (n_active, n_nondino)
+    mean = flat.mean(axis=0)
+    std = flat.std(axis=0)
+    std = np.where(std < 1e-8, 1.0, std)
+    nondino = (nondino - mean) / std
+    np.savez(os.path.join(out_base_dir, 'nondino_standardization.npz'),
+             mean=mean, std=std, features=np.array(model_features))
+    print(f"Standardized non-DINO features: mean={mean}, std={std}")
+
+# --- concatenate DINO PCs (after the scalar model_features) ---
+if use_dino:
+    dino = np.concatenate(dino_list, axis=1).astype(float)    # (T, total, n_dino_pcs)
+    emissions = np.concatenate([nondino, dino], axis=-1)
+    final_feature_names = list(model_features) + [f'dino_pc_{i}' for i in range(dino.shape[-1])]
+else:
+    emissions = nondino
+    final_feature_names = list(model_features)
+
+with open(os.path.join(out_base_dir, 'final_feature_names.txt'), 'w') as fh:
+    fh.write("\n".join(final_feature_names) + "\n")
+print(f"\nCombined emissions shape: {emissions.shape}  (emission_dim={emissions.shape[-1]})")
+print(f"Final feature names: {final_feature_names}")
 
 
 # ============================================================
@@ -464,8 +495,13 @@ print("=" * 60)
 states_flat = np.array(masked_state_assignments.T).flatten()
 emissions_flat = np.array(emissions.reshape(-1, emissions.shape[-1]))
 
-num_features = len(model_features)
-df = pd.DataFrame(emissions_flat, columns=model_features)
+# Show non-DINO features in their real units (invert the z-score) so e.g. the
+# cancer-contact histogram reflects actual values, not standardized ones.
+if standardize_nondino:
+    n_nd = len(model_features)
+    emissions_flat[:, :n_nd] = emissions_flat[:, :n_nd] * std + mean
+
+df = pd.DataFrame(emissions_flat, columns=final_feature_names)
 df['state'] = states_flat
 df_clean = df.dropna(subset=['state']).copy()
 df_clean['state'] = df_clean['state'].astype(int)
@@ -474,27 +510,35 @@ df_clean['state'] = df_clean['state'].astype(int)
 # discrete / binary features get histograms.
 _discrete_features = {'cancer_contact', 't_cell_neighbors'}
 
+n_feat = len(final_feature_names)
+ncols = 4
+nrows = int(np.ceil(n_feat / ncols))
 fig, axes = plt.subplots(
-    1, num_features,
-    figsize=(3 * num_features, 3),
+    nrows, ncols,
+    figsize=(3 * ncols, 3 * nrows),
     tight_layout=True,
     squeeze=False,
 )
 axes = axes.flatten()
 
-for i, feat in enumerate(model_features):
+for i, feat in enumerate(final_feature_names):
+    ax = axes[i]
     if feat in _discrete_features:
         sns.histplot(data=df_clean, x=feat, hue='state',
-                     ax=axes[i], palette='viridis',
+                     ax=ax, palette='viridis',
                      common_norm=False, stat='density', element='step',
                      discrete=True, legend=False)
-        axes[i].set_xlabel(feat.replace("_", " ").title())
+        ax.set_xlabel(feat.replace("_", " ").title())
     else:
         sns.violinplot(data=df_clean, x='state', y=feat, hue='state',
-                       ax=axes[i], palette='viridis', legend=False)
-        axes[i].set_ylabel(feat.replace("_", " ").title())
-        axes[i].set_xlabel('AR-HMM State')
-    sns.despine(ax=axes[i])
+                       ax=ax, palette='viridis', legend=False)
+        ax.set_ylabel(feat.replace("_", " ").title())
+        ax.set_xlabel('AR-HMM State')
+    sns.despine(ax=ax)
+
+# Blank any unused panels in the grid.
+for j in range(n_feat, len(axes)):
+    axes[j].axis('off')
 
 plt.savefig(os.path.join(out_base_dir, 'feature_distributions.png'),
             dpi=300, bbox_inches='tight')

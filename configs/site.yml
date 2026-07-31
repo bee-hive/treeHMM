@@ -1,0 +1,76 @@
+# Machine- and dataset-level facts.
+#
+# Everything here describes what the data IS and where it lives, not what an
+# experiment does with it.  Changing anything in this file changes the meaning
+# of the inputs, so it invalidates caches; nothing here is an experimental knob.
+#
+# This is the only file that needs editing to move the repo to another checkout
+# or another machine.
+
+paths:
+  # Ground-truth CVAT tracks, one directory per crop:
+  #   {ground_truth_tracks_dir}/{well}/{crop_id}/ALL_tracks.tiff   (T, H, W) uint16
+  #                                             /ALL_cancer_ids.pkl  list[int]
+  #                                             /ALL_graph.pkl       {daughter: parent}
+  # ALL_tracks.tiff holds cancer and T cells in one ID space; ALL_cancer_ids.pkl
+  # says which IDs are cancer, so T cells are every other non-zero ID.
+  # ALL_graph.pkl is the division lineage and is deliberately NOT read: the
+  # pipeline does not use the tree half of the model (see tree_input.md).
+  ground_truth_tracks_dir: /gladstone/engelhardt/lab/MarsonLabIncucyteData/groundTruthTracks/TCR-T
+
+  # The ONLY image source spatially aligned with those tracks:
+  #   {image_crops_dir}/{well}/{crop_id}/crop.tiff  (T, H, W, 2) float32
+  #   channel 0 = RFP, channel 1 = phase.
+  # Slicing a per-well registered.tiff by the crop_id coordinates lands on a
+  # DIFFERENT region -- that was a real bug in an earlier pipeline, caught by
+  # comparing RFP-inside-mask ratios.  Do not reintroduce it.
+  image_crops_dir: /gladstone/engelhardt/lab/MarsonLabIncucyteData/TrackingCrops/CarnevaleRepStim
+
+  # Read only by cells.source: nuclei, which is a declared seam and not yet
+  # implemented.  Kept here so the seam has somewhere to point.
+  caliban_tracks_dir: /gladstone/engelhardt/lab/MarsonLabIncucyteData/groundTruthCalibanTracks
+
+  # Outputs.  Both are under analysis/, which is gitignored in its entirety.
+  output_root: /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/treeHMM/analysis/runs
+  cache_root: /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/treeHMM/analysis/cache
+
+  # Put on PYTHONPATH for every step, so `treearhmm` and `models.tarhmm` import
+  # without this repo being pip-installed.
+  repo_root: /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/treeHMM
+
+# Conda environments, one per step role.  There is NO environment named
+# `occident` -- older docs said so and were wrong.  `AnalysisEnv` exists but is
+# Python 3.14 and unrelated.  `treearhmm doctor` checks all three resolve.
+envs:
+  imaging: OccidentAnalysis   # numpy 1.26, skimage, tifffile, matplotlib, imageio
+  dino: cs229Dino             # torch, transformers, sklearn  (numpy 2.4)
+  model: treeHMM_env          # jax, dynamax                  (numpy 2.4)
+
+data:
+  # The six ground-truth crops.  Order here does not matter: the pipeline sorts
+  # them, so reordering this list changes neither a cache key nor a fit.
+  crop_ids:
+    - B4_t50t100y200y350x750x900
+    - B4_t250t300y200y350x750x900
+    - B8_t50t100y200y350x750x900
+    - B8_t250t300y200y350x750x900
+    - E4_t50t100y200y350x750x900
+    - E4_t250t300y200y350x750x900
+
+  # Experimental condition per crop.  Used for reporting only -- the fit is
+  # joint across all crops and never sees this grouping.
+  conditions:
+    SH:
+      - B4_t50t100y200y350x750x900
+      - B4_t250t300y200y350x750x900
+    RASA2:
+      - E4_t50t100y200y350x750x900
+      - E4_t250t300y200y350x750x900
+    CUL5:
+      - B8_t50t100y200y350x750x900
+      - B8_t250t300y200y350x750x900
+
+hardware:
+  # One A30 is plenty for both the DINO forward pass and the fit, and pinning
+  # keeps a stray notebook on the other card out of the way.
+  cuda_visible_devices: "0"

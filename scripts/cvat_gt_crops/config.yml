@@ -11,21 +11,25 @@
 # ------------------------------------------------------------------
 crop_ids:
   - B4_t50t100y200y350x750x900
-  - E4_t50t100y200y350x750x900
   - B8_t50t100y200y350x750x900
+  - E4_t50t100y200y350x750x900
+  - B4_t250t300y200y350x750x900
+  - B8_t250t300y200y350x750x900
+  - E4_t250t300y200y350x750x900
 
 # ------------------------------------------------------------------
 # Experimental conditions mapped to crop IDs
-# (validation run: one example crop per condition)
 # ------------------------------------------------------------------
 conditions_dict:
   SH:
     - B4_t50t100y200y350x750x900
+    - B4_t250t300y200y350x750x900
   RASA2:
     - E4_t50t100y200y350x750x900
+    - E4_t250t300y200y350x750x900
   CUL5:
     - B8_t50t100y200y350x750x900
-
+    - B8_t250t300y200y350x750x900
 # ------------------------------------------------------------------
 # Emission feature names (axis-2 of the emissions array, as computed
 # by calculate_emissions.py).  All listed features are always saved.
@@ -50,6 +54,20 @@ model_features:
 num_states: 2
 min_t: 2          # minimum active frames to keep a cell (must be > num_lags)
 num_lags: 0       # AR lag order. Set to 0 to disable AR (defaults to a Gaussian HMM).
+standardize_nondino: true # z-score velocity & cancer_contact before fitting
+
+# ------------------------------------------------------------------
+# DINOv2 image-embedding settings.  DINO PCs are concatenated AFTER the
+# model_features above (they are not listed in emission_feature_names).
+#   compute_dino_embeddings.py (cs229Dino) -> reduce_dino_pca.py (cs229Dino)
+# ------------------------------------------------------------------
+use_dino: true            # if false, emission_dim = len(model_features)
+dino_model_id: facebook/dinov2-base
+dino_model_path: /gladstone/engelhardt/home/jadjasu/.cache/huggingface/hub/models--facebook--dinov2-base
+n_dino_pcs: 10            # top-N principal components of the 768-d embedding
+dino_patch_px: 15         # side length of the RGB crop centered on the T cell centroid
+dino_rgb_alpha: 0.3       # alpha for the inline get_RGB_image_with_nuclei copy
+dino_batch_size: 256      # patches per DINOv2 forward batch
 
 # ------------------------------------------------------------------
 # Input data paths
@@ -61,16 +79,16 @@ caliban_base_dir: /gladstone/engelhardt/lab/MarsonLabIncucyteData/groundTruthCal
 experiment_config_path: /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/MarsonImagingPipeline/snakemake_configs/experiment.yml
 
 # MarsonImagingPipeline repo root (added to sys.path for imports)
-imaging_pipeline_dir: /gladstone/engelhardt/lab/adamw/MarsonImagingPipeline
+imaging_pipeline_dir: /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/MarsonImagingPipeline
 
 # treeHMM repo root (added to sys.path for model imports)
-treehmm_dir: /gladstone/engelhardt/lab/jadjasu/treeHMM_temp
+treehmm_dir: /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/treeHMM
 
 # ------------------------------------------------------------------
 # Output base directory
 # Per-crop outputs are written to: {output_base_dir}/{crop_id}/
 # ------------------------------------------------------------------
-output_base_dir: /gladstone/engelhardt/lab/jadjasu/treeHMM/analysis/cvat_gt_crops_hmm_k2_m2
+output_base_dir: /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/treeHMM/analysis/cvat_gt_crops_hmm_k2_m2_dino
 
 # ------------------------------------------------------------------
 # Video rendering settings

@@ -11,6 +11,7 @@
 #   Step 3  reduce_dino_pca.py           cs229Dino         (PCA)
 #   Step 4  fit_cancer_arhmm.py          treeHMM_env       (JAX / model fit)
 #   Step 5  create_cancer_overlay_videos.py OccidentAnalysis (video render)
+#   Step 6  create_dino_mode_overlay_videos.py OccidentAnalysis (DINO PC1 mode video, if use_dino)
 #
 # Usage:
 #   cd scripts/cancer_dino_hmm
@@ -39,6 +40,12 @@ fi
 
 run "$FIT_ENV" python fit_cancer_arhmm.py                 # Step 4
 run "$OCCIDENT_ENV" python create_cancer_overlay_videos.py # Step 5
+
+# Optional: overlay videos colored by which mode of the bimodal DINO PC1 each
+# cancer cell falls into (independent of the HMM fit; needs use_dino).
+if [ "$USE_DINO" = "True" ]; then
+  run "$OCCIDENT_ENV" python create_dino_mode_overlay_videos.py  # Step 6
+fi
 
 echo
 echo "Pipeline complete."
