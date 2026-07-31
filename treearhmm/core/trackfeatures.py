@@ -541,7 +541,10 @@ def _intensity_stats(fb: FrameBundle, channel: int) -> dict[str, np.ndarray]:
 
     flat_labels = fb.labels.ravel()
     values = fb.image[..., channel].ravel().astype(np.float64)
-    size = int(fb.labels.max()) + 1
+    # Sized by the largest ID we will *index*, not the largest present in this
+    # frame: a cell absent from this frame still has a column, and its ID may be
+    # the largest in the crop.
+    size = int(max(fb.labels.max(initial=0), fb.cell_ids.max(initial=0))) + 1
     counts = np.bincount(flat_labels, minlength=size).astype(np.float64)
     sums = np.bincount(flat_labels, weights=values, minlength=size)
     sums_sq = np.bincount(flat_labels, weights=values * values, minlength=size)

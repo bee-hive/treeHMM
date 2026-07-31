@@ -80,30 +80,40 @@ Fit using EM-- see the **Derivation** folder for forward–backward details.
 
 ---
 
+## Running it on real data
+
+The model above is driven by the `treearhmm` pipeline: one YAML file defines one
+run, every run produces the same four base outputs, and feature computation is
+decoupled from model fitting.
+
+```bash
+treearhmm doctor                    # environments, paths, CUDA, npz round-trip
+treearhmm run configs/_smoke.yml    # one crop, no DINO, about a minute
+```
+
+See **`treearhmm/README.md`** for the step chain, the config layering, and how to
+add a feature, a modality or an extra. See **`tree_input.md`** for the exact
+contract between the pipeline and `models/tarhmm.py` -- the six arrays, their
+shapes and dtypes, and the preprocessing order.
+
+Note that the pipeline **does not use the tree**: divisions are out of scope, so
+every cell is an independent chain and the division kernel is never exercised.
+The model retains the capability; the pipeline does not use it.
+
+## Environments
+
+Three conda environments; see `env_setup.md` for how `treeHMM_env` is built and
+for the `tensorflow-probability` gotcha.
+
+| env | role |
+|-----|------|
+| `treeHMM_env` | JAX / Dynamax / this model |
+| `OccidentAnalysis` | microscopy I/O, features, plotting, video |
+| `cs229Dino` | DINOv2 embedding and PCA |
+
 ## TODOs
 
-- Optionally, division events themselves can be modeled by appending a division indicator to the observations.  
-- Tests  
-- Improve sampling and demonstration notebook  
-
----
-
-See the notebook for usage.
-
-## Environment requirements
-Follow these steps exactly to create a working `treeHMM_env` conda environment. 
-
-```
-conda install pip
-pip install matplotlib
-pip install seaborn
-pip install jupyter
-pip install tifffile
-pip install https://storage.googleapis.com/jax-releases/nocuda/jaxlib-0.4.35-cp312-cp312-manylinux2014_x86_64.whl
-pip install dynamax "jax==0.4.35" "jaxlib==0.4.35" "numpy<2.1"
-```
-
-Use this diagnostic line to confirm that your install is correct:
-```
-hasattr(jax.interpreters.xla, 'pytype_aval_mappings')
-```
+- Optionally, division events themselves can be modeled by appending a division
+  indicator to the observations.
+- Improve sampling and the demonstration notebook.
+- `sample()` is not implemented on `tARHMM`.

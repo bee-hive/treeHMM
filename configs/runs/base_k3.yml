@@ -1,0 +1,17 @@
+# Track features only: shape, motion and T-cell contact. No appearance
+# embedding. The control that says what the DINO components are worth.
+
+extends: ../default.yml
+
+run_name: base_k3
+description: Shape, motion and contact from the tracks alone, three states, AR(1).
+
+model:
+  features: [area, circularity, velocity, t_cell_neighbors]
+  use_dino_pcs: false
+  num_states: 3
+  num_lags: 1
+  em_seeds: [0, 1, 2]
+
+outputs:
+  extras: [state_timeline, condition_stats]

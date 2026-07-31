@@ -1,0 +1,7 @@
+# dino_k3 with a fourth state. Shares the features, dino and pca caches with
+# every other run in the sweep, because none of those steps depends on model.*
+extends: dino_k3.yml
+run_name: dino_k4
+description: As dino_k3, four states.
+model:
+  num_states: 4

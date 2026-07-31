@@ -200,3 +200,43 @@ class MasksMatchFeatures(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class IntensityStats(unittest.TestCase):
+    """Regression: the bincount must be sized by the IDs indexed, not those present."""
+
+    def bundle(self, present_ids, all_ids):
+        labels = np.zeros((20, 20), np.int32)
+        for offset, label in enumerate(present_ids):
+            labels[offset * 2 : offset * 2 + 2, 0:2] = label
+        image = np.zeros((20, 20, 2), np.float32)
+        image[..., 0] = 0.5
+        image[..., 1] = 0.25
+        return tf.FrameBundle(
+            labels=labels,
+            other_labels=np.zeros_like(labels),
+            image=image,
+            cell_ids=np.array(all_ids, np.int32),
+            centroids=np.full((len(all_ids), 2), np.nan),
+            other_centroids=np.zeros((0, 2)),
+            params={},
+        )
+
+    def test_a_cell_absent_from_this_frame_does_not_overflow_the_bincount(self):
+        """The highest-numbered cell may be missing from any given frame."""
+        fb = self.bundle(present_ids=[3], all_ids=[3, 117])
+        stats = tf._intensity_stats(fb, channel=0)
+        self.assertAlmostEqual(float(stats["mean"][0]), 0.5)
+        self.assertTrue(np.isnan(stats["mean"][1]))
+
+    def test_mean_and_total_match_the_pixels(self):
+        fb = self.bundle(present_ids=[3], all_ids=[3])
+        stats = tf._intensity_stats(fb, channel=1)
+        self.assertAlmostEqual(float(stats["mean"][0]), 0.25)
+        self.assertAlmostEqual(float(stats["total"][0]), 0.25 * 4)
+        self.assertAlmostEqual(float(stats["std"][0]), 0.0, places=6)
+
+    def test_no_image_gives_nan_rather_than_raising(self):
+        fb = self.bundle(present_ids=[3], all_ids=[3])
+        fb.image = None
+        self.assertTrue(np.isnan(tf._intensity_stats(fb, channel=0)["mean"]).all())

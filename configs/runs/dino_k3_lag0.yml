@@ -1,0 +1,8 @@
+# dino_k3 as a plain Gaussian HMM (no autoregression). cells.warmup_frames is
+# held fixed, so this is scored over exactly the same cell-frames as dino_k3
+# and the two log probabilities are comparable.
+extends: dino_k3.yml
+run_name: dino_k3_lag0
+description: As dino_k3, lag 0 (Gaussian HMM).
+model:
+  num_lags: 0
