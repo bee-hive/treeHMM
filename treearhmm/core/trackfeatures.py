@@ -54,6 +54,11 @@ class Feature:
             folded into the features cache key, so changing a parameter no
             computed feature consumes does not invalidate the cache.
         needs_image (bool): reads the phase/RFP image, not just the masks.
+        bounds (tuple[float, float] | None): the range the quantity is
+            mathematically confined to, when it has one.  Values outside it are
+            not clipped -- they are counted and reported by the features step,
+            because a value that cannot exist means the estimator broke down and
+            that is worth knowing rather than hiding.
     """
 
     name: str
@@ -64,6 +69,7 @@ class Feature:
     depends: tuple[str, ...] = ()
     uses: tuple[str, ...] = ()
     needs_image: bool = False
+    bounds: tuple[float, float] | None = None
 
 
 FEATURE_REGISTRY: dict[str, Feature] = {}
@@ -75,12 +81,13 @@ def _register(feature: Feature) -> None:
     FEATURE_REGISTRY[feature.name] = feature
 
 
-def per_frame(name, *, units, doc, uses=(), needs_image=False):
+def per_frame(name, *, units, doc, uses=(), needs_image=False, bounds=None):
     """Register a per-frame feature: `(FrameBundle) -> (N,) float`."""
 
     def decorate(fn):
         _register(
-            Feature(name, PER_FRAME, units, doc, fn, uses=tuple(uses), needs_image=needs_image)
+            Feature(name, PER_FRAME, units, doc, fn, uses=tuple(uses),
+                    needs_image=needs_image, bounds=bounds)
         )
         return fn
 
@@ -303,6 +310,7 @@ def _perimeter(fb: FrameBundle) -> np.ndarray:
 @per_frame(
     "circularity",
     units="",
+    bounds=(0.0, 1.0),
     doc="4*pi*area / perimeter^2; 1.0 for a perfect disc, lower as the outline roughens",
 )
 def _circularity(fb: FrameBundle) -> np.ndarray:
@@ -312,17 +320,20 @@ def _circularity(fb: FrameBundle) -> np.ndarray:
     return np.where(perimeter > 0, value, np.nan)
 
 
-@per_frame("eccentricity", units="", doc="eccentricity of the fitted ellipse; 0 is a circle")
+@per_frame("eccentricity", units="", bounds=(0.0, 1.0),
+           doc="eccentricity of the fitted ellipse; 0 is a circle")
 def _eccentricity(fb: FrameBundle) -> np.ndarray:
     return fb.prop("eccentricity")
 
 
-@per_frame("solidity", units="", doc="area divided by convex hull area; drops when the cell blebs")
+@per_frame("solidity", units="", bounds=(0.0, 1.0),
+           doc="area divided by convex hull area; drops when the cell blebs")
 def _solidity(fb: FrameBundle) -> np.ndarray:
     return fb.prop("solidity")
 
 
-@per_frame("extent", units="", doc="area divided by bounding box area")
+@per_frame("extent", units="", bounds=(0.0, 1.0),
+           doc="area divided by bounding box area")
 def _extent(fb: FrameBundle) -> np.ndarray:
     return fb.prop("extent")
 

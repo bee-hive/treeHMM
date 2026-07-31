@@ -27,7 +27,7 @@ See `README.md` for the full probabilistic model and `Derivation/` for the forwa
 ## Layout
 - `models/tarhmm.py` — the entire model. Custom forward–backward inference plus a `tARHMM` class subclassing Dynamax's `LinearAutoregressiveHMM`.
 - `tree_input.md` — **the binding contract** for what the fit step hands the model: the six arrays, their shapes and dtypes, mask semantics, and the preprocessing order. Read this before touching the fit step.
-- `treearhmm/` — the pipeline package (under construction; see below).
+- `treearhmm/` — the pipeline package. **Read `treearhmm/README.md`** before changing it: it covers the step chain, the config layering, determinism, and the three ways to extend the pipeline (a track feature is one decorated function, a modality is one provider plus a step, an extra is one module).
 - `configs/` — run configurations. `site.yml` (paths, envs, crops) ← `default.yml` (experiment defaults) ← one file per run.
 - `utils.py` — `generate_tree_hmm_data()` (synthetic lineage data) and `visualize_lineage()`. Used only by notebooks and tests.
 - `notebooks/` — exploratory runs. `tree_arhmm.ipynb` at root is the main scratch notebook.

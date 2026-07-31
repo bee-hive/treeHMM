@@ -92,10 +92,37 @@ def _run(cfg: dict, layout, args) -> dict:
         )
 
         counts = lineage.summarize(masks)
+        active_mask = masks["active_mask"]
         undefined = {
-            name: int(np.isnan(values[name][masks["active_mask"]]).sum()) for name in requested
+            name: int(np.isnan(values[name][active_mask]).sum()) for name in requested
         }
-        summary[crop_id] = {**counts, "undefined_on_active": undefined}
+
+        # A value outside a feature's mathematical range means the estimator
+        # broke down -- skimage's perimeter, for instance, is unreliable on
+        # masks a few pixels across, which drives 4*pi*A/P^2 above 1.  These are
+        # reported, never clipped: silently bounding them would hide that the
+        # measurement is not trustworthy on those cells.
+        out_of_bounds = {}
+        for name in requested:
+            bounds = tf.FEATURE_REGISTRY[name].bounds
+            if bounds is None:
+                continue
+            sample = values[name][active_mask]
+            finite = sample[np.isfinite(sample)]
+            outside = (finite < bounds[0]) | (finite > bounds[1])
+            if outside.any():
+                out_of_bounds[name] = {
+                    "count": int(outside.sum()),
+                    "fraction": float(outside.mean()),
+                    "min": float(finite.min()),
+                    "max": float(finite.max()),
+                }
+
+        summary[crop_id] = {
+            **counts,
+            "undefined_on_active": undefined,
+            "out_of_bounds_on_active": out_of_bounds,
+        }
         print(
             f"  [{crop_id}] {counts['num_cells']} cells, {counts['num_frames']} frames, "
             f"{counts['active_cell_frames']} active cell-frames"
@@ -103,6 +130,14 @@ def _run(cfg: dict, layout, args) -> dict:
         for name, count in undefined.items():
             if count:
                 print(f"      {name}: {count} undefined (NaN) on active cell-frames")
+        for name, report in out_of_bounds.items():
+            bounds = tf.FEATURE_REGISTRY[name].bounds
+            print(
+                f"      WARNING {name}: {report['count']} values "
+                f"({100 * report['fraction']:.1f}%) outside {bounds}, "
+                f"range [{report['min']:.3g}, {report['max']:.3g}] -- the estimator "
+                f"is unreliable on these cells"
+            )
 
     io.write_yaml(
         out_root / "summary.yml",
