@@ -1,0 +1,22 @@
+# Shape and motion from the tracks, plus the top 10 whitened DINOv2 principal
+# components of 50 px phase patches centred on each cancer cell.
+#
+# The reference DINO run. Sweeps over num_states extend this file.
+
+extends: ../default.yml
+
+run_name: dino_k3
+description: Shape, motion and contact plus the top-10 DINO PCs, three states, AR(1).
+
+model:
+  features: [area, circularity, velocity, t_cell_neighbors]
+  use_dino_pcs: true
+  num_states: 3
+  num_lags: 1
+  em_seeds: [0, 1, 2]
+
+outputs:
+  # dino_confounds is not optional reading for a DINO run: a leading component
+  # that tracks frame index or crop identity means the states describe
+  # acquisition rather than phenotype.
+  extras: [state_timeline, condition_stats, dino_confounds]

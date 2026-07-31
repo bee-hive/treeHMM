@@ -1,0 +1,18 @@
+# One-crop exercise of the GPU path. Not a scientific run.
+extends: ../_smoke.yml
+
+run_name: _dino_smoke
+description: One-crop smoke test of the DINO and PCA steps.
+
+dino:
+  n_pcs: 4
+
+model:
+  features: [area, circularity, velocity]
+  use_dino_pcs: true
+  num_states: 3
+  num_em_iters: 15
+  em_seeds: [0]
+
+outputs:
+  extras: [dino_confounds]

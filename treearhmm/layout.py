@@ -305,7 +305,16 @@ class Layout:
         return self.step_dir(name) / crop_id
 
     def stamp_path(self, name: str) -> Path:
-        """Where a step records that it completed, and with which key."""
+        """Where a step records that it completed, and with which key.
+
+        A **shared** step stamps its own cache directory rather than the run
+        directory.  The whole point of content-addressing is that a second run
+        with the same inputs reuses the artifact; if the stamp lived in the run
+        directory, that second run would find no stamp and recompute a cache
+        entry that was already sitting there complete.
+        """
+        if STEPS_BY_NAME[name].shared:
+            return self.step_dir(name) / "_stamp.json"
         return self.stamp_dir / f"{name}.json"
 
     def log_path(self, name: str) -> Path:
