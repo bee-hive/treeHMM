@@ -14,8 +14,10 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Anchored to the repo root on purpose.  Unanchored `lib/` matches at ANY depth,
+# which silently ignored a whole package directory once and lost it.
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -176,4 +178,11 @@ cython_debug/
 # repo-specific
 notebooks/data/
 *_.DS_Store
+# every pipeline output lives here; nothing under it is committed
 analysis/
+**/type_sep_tracks/
+
+*.pkl
+*.tiff
+# transient downloads, not part of the repo
+*.whl

@@ -1,20 +1,33 @@
 # Environment Setup
 
-This project spans **two conda environments**. Use the right one for each task:
+This project spans **three conda environments**. Use the right one for each task:
 
-| Env | Used for | Scripts |
-|-----|----------|---------|
-| `treeHMM_env` | JAX / Dynamax / the tARHMM model | `fit_arhmm.py`, the tarHMM notebooks |
-| `occident` | microscopy I/O, feature extraction, video rendering | `calculate_emissions.py`, `create_overlay_videos.py` |
+| Env | Used for | Pipeline steps | Key versions |
+|-----|----------|----------------|--------------|
+| `treeHMM_env` | JAX / Dynamax / the tARHMM model | `fit` | py 3.11.15, jax 0.10.1, dynamax 1.0.1, numpy 2.4.6 |
+| `OccidentAnalysis` | microscopy I/O, feature extraction, plotting, video | `features`, `outputs`, `extras` | py 3.11.9, numpy 1.26.4, skimage 0.23.2, matplotlib 3.8.2, imageio + ffmpeg |
+| `cs229Dino` | DINOv2 embedding and PCA | `dino`, `pca` | torch 2.5.1 (CUDA), transformers 5.2.0, sklearn 1.8.0, numpy 2.4.2 |
 
-This document covers building **`treeHMM_env`** (the model environment). `occident` is a pre-existing lab environment with the `MarsonImagingPipeline` dependencies and is not built here.
+> There is **no env named `occident`** — earlier revisions of this file and of the
+> archived scripts said so and were wrong. `AnalysisEnv` also exists but is Python 3.14
+> and unrelated to this project. `treearhmm doctor` checks that all three names in
+> `configs/site.yml` resolve.
+
+> **Cross-environment hazard.** The three envs are on numpy 1.26.4 / 2.4.2 / 2.4.6 and
+> hand arrays to each other as `.npz`. Numeric and bool arrays round-trip; object
+> arrays and pickled payloads do not. The pipeline's rule is numeric/bool arrays only,
+> `allow_pickle=False` on every load, and all strings in JSON sidecars.
+
+This document covers building **`treeHMM_env`** (the model environment).
+`OccidentAnalysis` and `cs229Dino` are pre-existing lab environments and are not built
+here.
 
 ---
 
 ## Quick start
 
 ```bash
-bash scripts/setup_treeHMM_env.sh
+bash scripts/archive/setup_treeHMM_env.sh
 ```
 
 This creates `treeHMM_env`, installs everything, applies the TFP fix below, and verifies the GPU is visible. The rest of this document explains what it does and why.
@@ -47,7 +60,7 @@ conda run --no-capture-output -n treeHMM_env pip install \
   matplotlib seaborn pandas tifffile pyyaml fastprogress
 ```
 
-`dynamax` brings in jax, jaxlib, optax, scikit-learn, jaxtyping, and numpy. The remaining packages are what `scripts/cvat_gt_crops/fit_arhmm.py` needs for its plots and data loading.
+`dynamax` brings in jax, jaxlib, optax, scikit-learn, jaxtyping, and numpy. The remaining packages are what `treearhmm/steps/fit.py` needs for data loading and its summary output.
 
 ### 3. ⚠️ Critical: replace TensorFlow Probability with `tfp-nightly`
 
@@ -109,18 +122,22 @@ The setup above was verified end-to-end (model imports, 10 iterations of EM on s
 
 ## Running the model
 
-```bash
-# Fit the AR-HMM (uses treeHMM_env)
-conda run --no-capture-output -n treeHMM_env python scripts/cvat_gt_crops/fit_arhmm.py
-```
-
-The full three-step pipeline (which switches between `occident` and `treeHMM_env` automatically) is:
+The pipeline switches environments per step automatically:
 
 ```bash
-cd scripts/cvat_gt_crops && bash run_pipeline.sh
+treearhmm doctor                      # check all three envs, paths, CUDA
+treearhmm run configs/_smoke.yml      # one crop, no DINO, ~1 minute
 ```
 
-Before running, update the absolute paths in `scripts/cvat_gt_crops/config.yml` (`treehmm_dir`, `output_base_dir`, input dirs) to your checkout.
+To run one step by hand in its own environment:
+
+```bash
+conda run --no-capture-output -n treeHMM_env \
+  python -m treearhmm.steps.fit --run-dir analysis/runs/_smoke
+```
+
+Before the first run, set the absolute paths in `configs/site.yml` (`repo_root`,
+`output_root`, `cache_root`, and the three input directories) to your checkout.
 
 ---
 

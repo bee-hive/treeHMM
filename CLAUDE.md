@@ -8,40 +8,70 @@ An implementation of a **Tree Autoregressive Hidden Markov Model (Tree AR-HMM)**
 
 See `README.md` for the full probabilistic model and `Derivation/` for the forward–backward math.
 
+## Input Data
+- Well IDs: ['B8', 'B4', 'E4']
+- Phase Image Cell Tracks: `/gladstone/engelhardt/lab/MarsonLabIncucyteData/groundTruthTracks/TCR-T/<well_id>/<well_id>_<slice_id>/ALL_tracks.tiff`
+    - shape (T, Y, X)
+    - includes tracks for both cancer and T cells, cancer cells identified by `/gladstone/engelhardt/lab/MarsonLabIncucyteData/groundTruthTracks/TCR-T/<well_id>/<well_id>_<slice_id>/ALL_cancer_ids.pkl`
+- Cancer Nuclei Tracks: `/gladstone/engelhardt/lab/MarsonLabIncucyteData/groundTruthCalibanTracks/<well_id>_<slice_id>.tiff`
+    - shape (T, Y, X)
+    - includes only cancer cell nuclei
+- Raw Phase image: 
+    - shape (T, Y, X, 2)
+        - in last channel, 0 is RFP intensity, 1 is phase image
+- Conditions: 
+    - SH: ['B3', 'B4', 'B5', 'B6']
+    - RASA2: ['E3', 'E4', 'E5', 'E6']
+    - CUL5: ['B7', 'B9', 'B10']
+
 ## Layout
-
 - `models/tarhmm.py` — the entire model. Custom forward–backward inference plus a `tARHMM` class subclassing Dynamax's `LinearAutoregressiveHMM`.
-- `utils.py` — `generate_tree_hmm_data()` (synthetic lineage data with strict unique cell-IDs) and `visualize_lineage()`.
-- `scripts/cvat_gt_crops/` — the real-data pipeline (T cell microscopy crops); see below.
-- `notebooks/` — exploratory runs (arHMM, tarHMM, emission processing). `tree_arhmm.ipynb` at root is the main scratch notebook.
-- `analysis/` — committed pipeline outputs, named `cvat_gt_crops_{hmm,arhmm}_k{num_states}_m{model_features}/`.
+- `tree_input.md` — **the binding contract** for what the fit step hands the model: the six arrays, their shapes and dtypes, mask semantics, and the preprocessing order. Read this before touching the fit step.
+- `treearhmm/` — the pipeline package (under construction; see below).
+- `configs/` — run configurations. `site.yml` (paths, envs, crops) ← `default.yml` (experiment defaults) ← one file per run.
+- `utils.py` — `generate_tree_hmm_data()` (synthetic lineage data) and `visualize_lineage()`. Used only by notebooks and tests.
+- `notebooks/` — exploratory runs. `tree_arhmm.ipynb` at root is the main scratch notebook.
+- `analysis/` — **gitignored.** All pipeline output: `analysis/runs/<run_name>/` and the content-addressed `analysis/cache/`. Nothing here is committed.
+- `scripts/archive/`, `analysis/archive/` — the eight superseded per-experiment pipelines and their outputs. Reference only; do not extend them.
 
-There is no `__init__.py` and no `pip install` of this repo — code imports it by putting the repo root on `sys.path` and doing `from models.tarhmm import tARHMM`. `pyproject.toml` is inherited from Dynamax and describes the *dynamax* dependency, not this package.
+There is no `pip install` of this repo. `pyproject.toml` is inherited from Dynamax and describes *dynamax*, not this package. The CLI puts the repo root on `PYTHONPATH` when it spawns each step, which is what makes both `treearhmm` and `from models.tarhmm import tARHMM` importable in whichever env that step runs in.
+
+**`.gitignore` note:** lines 17–18 are `/lib/` and `/lib64/`, deliberately anchored. Unanchored `lib/` matches at any depth and once silently swallowed an entire package directory. Do not un-anchor them, and do not name a package directory `lib`.
 
 ## Conda environments
 
-The pipeline spans two environments and you must use the right one:
+The pipeline spans three environments and you must use the right one:
 
-- **`treeHMM_env`** — JAX / Dynamax / the model. Use for anything touching `models/tarhmm.py` (`fit_arhmm.py`, the tarHMM notebooks). Build it with `bash scripts/setup_treeHMM_env.sh` (Python 3.11, dynamax + GPU JAX with CUDA 12 wheels). **Gotcha:** `pip install dynamax` pulls *stable* `tensorflow-probability`, which is too old for current JAX (import fails on `jax.interpreters.xla.pytype_aval_mappings`) — the setup script replaces it with `tfp-nightly`, which is what `pyproject.toml` specifies. For CPU-only, drop the `[cuda12]` extra.
-- **`occident`** — microscopy I/O, feature extraction, video rendering (`calculate_emissions.py`, `create_overlay_videos.py`). Imports from the external `MarsonImagingPipeline` repo. (The pipeline README calls this `AnalysisEnv`; `run_pipeline.sh` uses `occident` — trust the script.)
+- **`treeHMM_env`** — JAX / Dynamax / the model. Anything touching `models/tarhmm.py`. Python 3.11.15, jax 0.10.1 (sees both A30s), dynamax 1.0.1, numpy 2.4.6. **Gotcha:** `pip install dynamax` pulls *stable* `tensorflow-probability`, too old for current JAX (import fails on `jax.interpreters.xla.pytype_aval_mappings`); it must be replaced with `tfp-nightly`.
+- **`OccidentAnalysis`** — microscopy I/O, feature extraction, plotting, video. Python 3.11.9, numpy 1.26.4, skimage 0.23.2, tifffile, pandas 2.1.4, matplotlib 3.8.2, imageio + ffmpeg.
+- **`cs229Dino`** — DINOv2 embedding and PCA. torch 2.5.1 (CUDA), transformers 5.2.0, sklearn 1.8.0, numpy 2.4.2.
 
-## Running the real-data pipeline
+There is **no env named `occident`** — older docs and scripts say so and are wrong. `AnalysisEnv` exists but is Python 3.14 and unrelated.
+
+**Cross-environment hazard:** the three envs are on numpy 1.26.4 / 2.4.2 / 2.4.6 and pass arrays to each other as `.npz`. Plain numeric and bool arrays round-trip; object arrays and pickled payloads do not. Rule: numeric/bool arrays only, `allow_pickle=False` on every load, all strings in JSON sidecars.
+
+## Running the pipeline
 
 ```bash
-cd scripts/cvat_gt_crops
-bash run_pipeline.sh            # all three steps, each in its correct conda env
+treearhmm run configs/_smoke.yml      # one crop, no DINO, ~1 minute
+treearhmm status configs/_smoke.yml   # which steps are current and why
+treearhmm doctor                      # envs, paths, CUDA, npz round-trip
 ```
 
-Three ordered steps (run individually with `conda run --no-capture-output -n <env> python <script>`):
-1. `calculate_emissions.py` (`occident`) — per-cell features → `.npy` emission arrays.
-2. `fit_arhmm.py` (`treeHMM_env`) — fits one joint AR-HMM across all crops, writes state assignments + summary plots.
-3. `create_overlay_videos.py` (`occident`) — renders state-colored overlay `.mp4`s.
+One YAML defines one run. Steps run in a fixed chain, each in its own env, and each is independently runnable: `python -m treearhmm.steps.<name> --run-dir <dir>`. Shared steps (`features`, `dino`, `pca`) are content-addressed into `analysis/cache/` and reused by any run with the same inputs; `fit`, `outputs` and `extras` are run-local.
 
-All shared parameters live in `config.yml` — `num_states`, `num_lags`, `min_t`, `model_features` (subset of `emission_feature_names` actually fed to the model), crop IDs, and absolute input/output paths. Change behavior there, not in the scripts.
+Change behaviour in the config, never in the scripts. Sweeps are several small configs sharing a base via `extends:`.
 
-There are no automated tests (writing them is an open TODO in the README).
+There are no automated tests yet beyond `tests/` (unit tests for config, lineage, features and the npz round-trip); the smoke config is the end-to-end regression check.
 
 ## Model architecture — key concepts to know before editing `models/tarhmm.py`
+
+> **The pipeline does not use the tree.** Divisions are out of scope: `treearhmm`
+> builds `is_division_mask` all-False and `parent_indices` always self, so every cell
+> is an independent chain, `P_div` is never exercised, and `ALL_graph.pkl` is not read.
+> The section below describes the model's full capability, which the pipeline uses only
+> the non-division half of. Do not add division handling to the pipeline without
+> changing `tree_input.md` first.
 
 **Data is a dense `(T, MAX_CELLS, D)` tensor with one fixed column per unique cell.** Columns are never reused: a cell that dies leaves its column inactive forever; a division ends the parent's column and allocates two new columns. Everything is driven by per-`(t, cell)` boolean/index masks that travel together through every function:
 - `active_mask` — cell exists/observed at `(t, cell)`.
@@ -65,4 +95,6 @@ To get state assignments after fitting, run `tree_hmm_two_filter_smoother(*arhmm
 
 - Inactive/padded cells carry zeros and NaNs by design; stats use `jnp.nansum` / explicit masking. Preserve this when changing reductions.
 - `models/tarhmm.py` sets `config.update("jax_disable_jit", False)` at import and has a commented-out debug toggle — leave jit on unless actively debugging.
-- The pipeline reindexes cells (`filter_tracks_by_time`, `min_t` filtering) and **remaps `parent_indices` accordingly**, promoting orphaned cells to new roots. Any code that filters columns must keep `parent_indices`, the masks, and emissions consistent, or inference breaks silently.
+- The pipeline reindexes cells (`lineage.filter_short_cells`, `cells.min_frames`) and **remaps `parent_indices` accordingly**. Any code that filters columns must keep `parent_indices`, the masks, and emissions consistent, or inference breaks silently rather than loudly. `lineage.assert_consistent()` is called at the end of every column-space operation for exactly this reason — keep it that way.
+- `compute_inputs` and `fit_em` take the masks in **different orders** (`is_new_root_mask` before vs after `active_mask`). They are same-shaped booleans, so a swap runs happily and returns nonsense. Never call either positionally: go through the `MaskBundle` wrappers in `treearhmm/steps/fit.py`.
+- `initialize(method="kmeans", emissions=...)` wants a **2D array of active cell-frames only**, not the padded `(T, C, D)` tensor. Passing the 3D tensor lets padding zeros dominate the centroids, and once features are z-scored the model's norm-based padding detection stops working.
