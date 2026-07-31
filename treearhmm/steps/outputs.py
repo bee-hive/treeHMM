@@ -32,7 +32,7 @@ import numpy as np  # noqa: E402
 
 from treearhmm import config as cfgmod  # noqa: E402
 from treearhmm.core import cells as cellsmod  # noqa: E402
-from treearhmm.core import io, providers, viz  # noqa: E402
+from treearhmm.core import io, viz  # noqa: E402
 from treearhmm.steps import step_main  # noqa: E402
 
 
