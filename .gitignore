@@ -177,12 +177,26 @@ cython_debug/
 
 # repo-specific
 notebooks/data/
-*_.DS_Store
+.DS_Store
 # every pipeline output lives here; nothing under it is committed
 analysis/
 **/type_sep_tracks/
 
+# This repo tracks code, config and the prose explaining them -- never data or
+# pipeline output.  Ignored by extension so a stray output written outside
+# analysis/ cannot slip in.  Anything here that genuinely needs tracking is a
+# deliberate `git add -f`, justified in the commit message.
 *.pkl
 *.tiff
+*.tif
+*.npy
+*.npz
+*.csv
+*.mp4
+
+# NOTE: image formats are deliberately NOT ignored.  figs/*.png are the model
+# diagrams referenced by README.md and Derivation/*.tex -- explanation, not
+# output.  Keep rendered pipeline figures under analysis/, which is ignored.
+
 # transient downloads, not part of the repo
 *.whl
