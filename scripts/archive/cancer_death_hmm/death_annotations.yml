@@ -1,0 +1,104 @@
+# ============================================================
+# Ground-truth cancer-cell death events (machine-readable)
+# ============================================================
+# Transcribed from:
+#   /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/MarsonImagingPipeline/
+#     data/gt-death-events.md
+#
+# `cell_id` is the CVAT track ID, which is what channel 1 of the
+# type-separated tracks carries -- so these IDs index the cancer phase
+# columns directly (verified: B8_t50's phase channel contains IDs
+# {1,2,3,4,5,41,...,113}).  They are NOT Caliban nucleus IDs.
+#
+# ------------------------------------------------------------------
+# Minute -> frame conversion
+# ------------------------------------------------------------------
+# The source notes give times in minutes as displayed on the
+# `_gt_tracks.mp4` overlays.  Those are ABSOLUTE experiment minutes at
+# 5 min/frame, so for a crop starting at absolute frame `t0`:
+#
+#     local_frame = round(minute / 5) - t0
+#
+# This was derived, not assumed, and then verified against the masks:
+# for every B8_t50 cell with a clean event, the largest area drop with a
+# simultaneous circularity rise falls inside the converted window --
+# cell 4 -> local 16 (window 15-22), cell 1 -> local 40 (window 39-42),
+# cell 3 -> local 14 (window 5-15).  Cell 41's "already dead before
+# min 250" resolves to exactly the crop start (frame 50 = 250 min),
+# which is the strongest single confirmation.
+#
+# NOTE: `experiment.yml` declares TIME_FACTOR: 4, which is inconsistent
+# with the above.  The 5 min/frame value is what the annotations and the
+# pixel data agree on, so it is what `minutes_per_frame` below is set to.
+# If the mp4 overlay convention is ever confirmed to be something else,
+# change this one value and the frame windows recompute.
+minutes_per_frame: 5
+
+# Tolerance (frames) allowed between an annotated window and a detected
+# state entry when scoring.  +/-2 frames = +/-10 minutes.
+match_tolerance_frames: 2
+
+events:
+  # ------------------------------------------------------------------
+  - crop: B8_t50t100y200y350x750x900
+    cell_id: 4
+    minutes: [325, 360]
+    local_frames: [15, 22]
+    confidence: high
+    note: >-
+      Clear, maintained shape across early frames, then a drastic change
+      over a single frame.  Observed |dArea| peak with dCirc +0.269 at
+      local frame 16.
+
+  - crop: B8_t50t100y200y350x750x900
+    cell_id: 1
+    minutes: [445, 460]
+    local_frames: [39, 42]
+    confidence: high
+    note: >-
+      Same drastic shape change.  Observed dArea -236 with dCirc +0.246
+      at local frame 40.  Annotated window runs slightly past the end of
+      the 50-frame crop (450 min); the event itself is in range.
+
+  - crop: B8_t50t100y200y350x750x900
+    cell_id: 3
+    minutes: [275, 325]
+    local_frames: [5, 15]
+    confidence: medium
+    note: >-
+      "Slightly out of frame but seems like it gets killed."  Wide
+      annotated window.  Observed dCirc +0.184 at local frame 14, near
+      the upper edge of the window.
+
+  # Already dead when the crop starts -- there is no transition to
+  # detect.  Scored differently: this cell should sit in the death state
+  # for most/all of its track rather than entering it at some frame.
+  - crop: B8_t50t100y200y350x750x900
+    cell_id: 41
+    minutes: null
+    local_frames: null
+    already_dead: true
+    confidence: high
+    note: >-
+      Already looks dead before the video starts (before min 250 = crop
+      start), surrounded by T cells.  Shows the scattered, high-variance
+      shape fluctuation expected of a dead-but-tracked cell rather than a
+      single clean transition.
+
+  # ------------------------------------------------------------------
+  # Unresolved timing.  "mins 420-430" cannot be absolute experiment
+  # minutes for a crop spanning frames 250-300 (= 1250-1500 min at
+  # 5 min/frame), and no local-clock convention reproduces it either.
+  # Kept as a CELL-LEVEL label only: this cell dies somewhere in the
+  # crop, frame unknown.  Scored as "does this cell ever enter the death
+  # state" rather than "at which frame".
+  - crop: B8_t250t300y200y350x750x900
+    cell_id: 6
+    minutes: [420, 430]
+    local_frames: null
+    cell_level_only: true
+    confidence: high
+    note: >-
+      Timing convention for the t250 crop does not match the t50 crop.
+      Needs the mp4 overlay convention confirmed before this becomes a
+      frame-level label.
