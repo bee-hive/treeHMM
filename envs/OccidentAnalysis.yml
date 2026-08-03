@@ -1,0 +1,31 @@
+# The `imaging` environment: microscopy I/O, feature extraction, plots, video.
+#
+# Runs `treearhmm.steps.features`, `steps.outputs` and `steps.extras`.
+# The name must match `envs.imaging` in configs/site.yml -- the CLI invokes
+# `conda run -n OccidentAnalysis`.  This is a working spec for the pipeline,
+# not a byte-identical clone of the lab environment of the same name.
+
+name: OccidentAnalysis
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11.9
+  - pip
+  - pip:
+    - numpy==1.26.4
+    - matplotlib==3.8.2
+    - seaborn==0.13.1
+    - statsmodels==0.14.2
+    - pandas==2.1.4
+    - scipy==1.11.4
+    - scikit-image==0.23.2
+    - tifffile==2024.5.10
+    - notebook==7.0.8
+    - imageio
+    - imageio-ffmpeg
+    - PyYAML
+    - tqdm
+    - traccuracy
+    - ultrack
+    - ipywidgets

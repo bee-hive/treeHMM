@@ -35,8 +35,7 @@ See `README.md` for the full probabilistic model and `Derivation/` for the forwa
 dropped when `outputs.extras` is empty.
 
 Cached steps are content-addressed under `analysis/cache/<step>/<key>/` and shared across
-runs, so a sweep over `model.*` recomputes only `fit` onward. Use `--force`
-to redo a step whose key has not changed.
+runs, so a sweep over `model.*` recomputes only `fit` onward.
 
 `treearhmm/README.md` is the detailed reference (determinism rules, cache keys,
 provider abstraction); `env_setup.md` covers building `treeHMM_env`.
@@ -59,15 +58,37 @@ python -m treearhmm run --dry-run configs/runs/dino_k3.yml
 python -m treearhmm run    configs/runs/dino_k3.yml
 ```
 
+**Every step is skipped when its key and artifacts are still current — run-local ones too.**
+So `run` on a finished config is a silent no-op that still exits 0; if you meant to
+recompute, you must say so:
+
+| flag | effect |
+|---|---|
+| `--force` | on its own, recompute **every** step in the chain, cached ones included |
+| `--from <step>` | start at `<step>`; combined with `--force`, only `<step>` itself is forced |
+| `--force-all` | only meaningful with `--from` — force the later steps too, not just `<step>` |
+| `--allow-config-change` | reuse a run directory whose stored config differs (otherwise refused, naming the differing keys) |
+
+`--dry-run` ignores `--force` and reports every step `cached` regardless, so it cannot be
+used to preview a forced run.
+
 Results land in `analysis/runs/<run_name>/`:
 
+**Book-keeping outputs:**
 ```
 config.resolved.yml            frozen copy; the sole input to every step
 manifest.yml                   commit, host, per-step env / key / timing / status
-_stamps/<step>.json            run-local step completion
+_stamps/<step>.json            run-local steps only; a cached step stamps its cache dir
 logs/<step>.log
-features -> ../../cache/features/<key>      symlink; likewise dino/, pca/
-fit/                           fit_summary.yml, cell_index.csv, and the .npy/.npz arrays
+features -> <cache_root>/features/<key>     absolute symlink; likewise dino/, pca/
+fit/      
+  fit_summary.yml, 
+  cell_index.csv, 
+  and the .npy/.npz arrays
+```
+
+**Analytical Outputs**:      
+```               
 outputs/
   overlays/<crop>_state_overlay.mp4         cancer cells tinted by state
   feature_distributions.png                 every cached feature, per state
@@ -79,12 +100,13 @@ outputs/
   extras/<name>/
 ```
 
-To debug one step by hand, in its own environment — it reads `config.resolved.yml`
-and nothing else, so this is identical to what the driver does:
+To debug one step by hand, in its own environment — it reads `config.resolved.yml` and
+nothing else, so this is what the driver does. It is stamp-guarded like the driver too,
+and takes its own `--force`; without it a current step prints `nothing to do`:
 
 ```bash
 PYTHONPATH=$PWD conda run --no-capture-output -n treeHMM_env \
-  python -m treearhmm.steps.fit --run-dir analysis/runs/dino_k3
+  python -m treearhmm.steps.fit --run-dir analysis/runs/dino_k3 --force
 ```
 
 ## Create New Features
@@ -94,16 +116,36 @@ Nothing else changes: config validation, the emission vector, the plots, the CSV
 headers and the held-out diagnostics all read `FEATURE_REGISTRY`.
 
 ```python
-@per_frame("my_feature", units="px^2", doc="one sentence, shown as the plot subtitle",
+@per_frame("my_ratio", units="", doc="one sentence, shown as the plot subtitle",
            uses=("neighbor_radius_px",), needs_image=False, bounds=(0.0, 1.0))
-def _my_feature(fb):                    # fb: FrameBundle -> (N,) float, NaN where absent
-    return fb.prop("area") * 2
+def _my_ratio(fb):                      # fb: FrameBundle -> (N,) float, NaN where absent
+    return fb.prop("area") / fb.prop("area").max()
 
 @temporal("my_delta", units="", depends=("area",), uses=("window_frames",),
           doc="one sentence")
 def _my_delta(sb):                      # sb: SeriesBundle -> (T, N) float
     return sb.values["area"] - sb.prev("area")
 ```
+
+The decorator arguments, none of which are cosmetic:
+
+- `units` — free text, rendered verbatim on the plot axis. Follow the registry: `px`,
+  `px^2`, `px/frame`, `count`, `a.u.`, and `""` for anything dimensionless — including
+  ratios, log quantities, and deltas of dimensionless quantities.
+- `bounds` — the closed range the quantity is **mathematically** confined to, or omit it
+  (default `None`) when it has none. It is not a plot range and not a normalization:
+  out-of-range values are counted and reported by the `features` step, never clipped,
+  because a value that cannot exist means the estimator broke down.
+- `uses` — `features.params` keys this feature reads. **Only these enter the features
+  cache key**, so a param no computed feature consumes can change without invalidating
+  the cache.
+- `depends` — other *registered features* this one reads, and only `@temporal` accepts it.
+  A regionprops column via `fb.prop("area")` is not a dependency; `sb.values["area"]` is.
+- `needs_image` — set when it reads the phase/RFP stack (`fb.image`, `(H, W, 2)`,
+  normalized over the whole stack).
+
+Return NaN for both the absent and the undefined case — `np.where(cond, value, np.nan)`
+inside `np.errstate(...)`, as `_circularity` and `_win_std_log_area` do. Never `inf`.
 
 Four rules that are load-bearing:
 
@@ -186,4 +228,6 @@ CLI switches between them automatically; you only name one when running a step b
 | `dino` | `cs229Dino` | `dino`, `pca` | py 3.11, torch 2.5.1 (CUDA), transformers 5.2.0, sklearn 1.8.0, numpy 2.4.2 |
 | `model` | `treeHMM_env` | `fit` | py 3.11.15, jax 0.10.1 (cuda12), dynamax 1.0.1, tfp-nightly, numpy 2.4.6 |
 
-- The CLI driver itself runs from any env with PyYAML + numpy
+- The CLI driver itself runs from any env with PyYAML + numpy — conda `base` is the usual
+  choice. It puts the repo root on `PYTHONPATH` for each child, which is what makes
+  `treearhmm` and `models.tarhmm` importable without the repo being pip-installed.

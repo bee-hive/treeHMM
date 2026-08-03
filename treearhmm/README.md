@@ -7,11 +7,11 @@ plus whatever extras it asks for. Feature computation is decoupled from model
 fitting, so adding a new input is a small, local change.
 
 ```bash
-treearhmm doctor                      # environments, paths, CUDA, npz round-trip
-treearhmm run    configs/_smoke.yml   # one crop, no DINO, about a minute
-treearhmm status configs/_smoke.yml   # which steps are current, and why
-treearhmm show   configs/runs/dino_k3.yml
-treearhmm list
+python -m treearhmm doctor                      # environments, paths, CUDA, npz round-trip
+python -m treearhmm run    configs/_smoke.yml   # one crop, no DINO, about a minute
+python -m treearhmm status configs/_smoke.yml   # which steps are current, and why
+python -m treearhmm show   configs/runs/dino_k3.yml
+python -m treearhmm list   configs/_smoke.yml
 ```
 
 The pipeline is not pip-installed. Run it from the repo root; the CLI puts the
@@ -80,7 +80,7 @@ run_name: dino_k4
 model: {num_states: 4}
 ```
 
-`treearhmm run configs/runs/dino_k{3,4,5,6}.yml` shares one `features` cache and
+`python -m treearhmm run configs/runs/dino_k{3,4,5,6}.yml` shares one `features` cache and
 one `pca` cache across all four, because none of those steps depends on
 `model.*`. That is the whole sweep story -- no sweep machinery, just the cache.
 
@@ -230,7 +230,7 @@ checkable.
 - **The three environments are on different numpy majors** (1.26 / 2.4 / 2.4) and
   pass arrays as `.npz`. Numeric and bool arrays round-trip; object arrays and
   pickles do not. `io.save_npz` rejects anything else and every string goes in a
-  JSON sidecar. `treearhmm doctor` checks the round trip.
+  JSON sidecar. `python -m treearhmm doctor` checks the round trip.
 - **`compute_inputs` and `fit_em` take the masks in different orders.** They are
   same-shaped boolean arrays, so a swap runs happily and returns nonsense. Go
   through `MaskBundle` in `steps/fit.py`; never call them positionally.

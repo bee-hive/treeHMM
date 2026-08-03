@@ -86,10 +86,19 @@ The model above is driven by the `treearhmm` pipeline: one YAML file defines one
 run, every run produces the same four base outputs, and feature computation is
 decoupled from model fitting.
 
+The package is **not pip-installed**, so there is no `treearhmm` command — run it
+as a module from the repo root, in conda `base`:
+
 ```bash
-treearhmm doctor                    # environments, paths, CUDA, npz round-trip
-treearhmm run configs/_smoke.yml    # one crop, no DINO, about a minute
+cd /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/treeHMM
+
+python -m treearhmm doctor                    # environments, paths, CUDA, npz round-trip
+python -m treearhmm run configs/_smoke.yml    # one crop, no DINO, under a minute warm
 ```
+
+Results land in `analysis/runs/_smoke/outputs/`: a state-coloured overlay video,
+per-state feature distributions, the learned transition matrix, and per-cell
+state assignments.
 
 See **`treearhmm/README.md`** for the step chain, the config layering, and how to
 add a feature, a modality or an extra. See **`tree_input.md`** for the exact
@@ -102,14 +111,63 @@ The model retains the capability; the pipeline does not use it.
 
 ## Environments
 
-Three conda environments; see `env_setup.md` for how `treeHMM_env` is built and
-for the `tensorflow-probability` gotcha.
+No single environment has JAX, torch and scikit-image together, so the pipeline
+spans three. **You do not activate any of them.** Run the CLI from conda `base`
+(it needs only PyYAML + numpy); it spawns each step under `conda run -n <env>`
+itself, using the names in `configs/site.yml` under `envs:`.
 
-| env | role |
-|-----|------|
-| `treeHMM_env` | JAX / Dynamax / this model |
-| `OccidentAnalysis` | microscopy I/O, features, plotting, video |
-| `cs229Dino` | DINOv2 embedding and PCA |
+| env | role in `site.yml` | what it is for |
+|-----|-----|------|
+| `OccidentAnalysis` | `imaging` | microscopy I/O, features, plotting, video |
+| `cs229Dino` | `dino` | DINOv2 embedding and PCA |
+| `treeHMM_env` | `model` | JAX / Dynamax / this model |
+
+Specs live in `envs/`. Create them with:
+
+```bash
+conda env create -f envs/OccidentAnalysis.yml
+conda env create -f envs/cs229Dino.yml
+conda env create -f envs/treeHMM_env.yml
+```
+
+`envs/AnalysisEnv.yml` is a separate lab environment and is **not** used by this
+pipeline. See `env_setup.md` for how `treeHMM_env` is built by hand and for the
+`tensorflow-probability` gotcha — `pip install dynamax` pulls a stable
+`tensorflow-probability` that is too old for current JAX, and it has to be
+replaced with `tfp-nightly`.
+
+Check that all three resolve, along with paths, CUDA and the cross-environment
+`.npz` contract:
+
+```bash
+python -m treearhmm doctor configs/runs/dino_k3.yml
+```
+
+### Which code runs in which environment
+
+Each step is a separate process in its own environment, so an import that is
+fine in one is unavailable in the other two.
+
+| code | environment | third-party imports it needs |
+|---|---|---|
+| `treearhmm/cli.py` — the driver | conda `base` (any env with the two) | `pyyaml`, `numpy` |
+| `treearhmm/steps/features.py` | `OccidentAnalysis` | `numpy`, `tifffile`, `scikit-image` |
+| `treearhmm/steps/outputs.py`, `steps/extras.py`, `treearhmm/extras/*` | `OccidentAnalysis` | `numpy`, `matplotlib`, `imageio` + `imageio-ffmpeg` |
+| `treearhmm/steps/dino.py` | `cs229Dino` | `numpy`, `torch`, `transformers`, `tifffile`, `matplotlib` |
+| `treearhmm/steps/pca.py` | `cs229Dino` | `numpy`, `scikit-learn` |
+| `treearhmm/steps/fit.py` → `models/tarhmm.py` | `treeHMM_env` | `numpy`, `jax`, `dynamax`, `tfp-nightly`, `fastprogress`, `jaxtyping` |
+
+Three modules are imported by **every** step and therefore have to import
+cleanly in all three environments: `treearhmm/config.py`, `treearhmm/core/io.py`
+and `treearhmm/core/trackfeatures.py`. They are restricted to `numpy`, `pyyaml`
+and the standard library — which is why `trackfeatures.py` imports scikit-image
+*inside* the functions that use it rather than at module level. Keep it that way.
+
+The three environments sit on different numpy majors (1.26.4 / 2.4.2 / 2.4.6)
+and hand arrays to each other as `.npz`. Numeric and bool arrays round-trip;
+object arrays and pickles do not, so the pipeline writes numeric/bool arrays
+only, loads with `allow_pickle=False`, and puts every string in a JSON sidecar.
+`doctor` checks this round trip.
 
 ## TODOs
 

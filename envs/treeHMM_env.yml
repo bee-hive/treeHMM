@@ -1,0 +1,37 @@
+# The `model` environment: JAX / Dynamax / the tARHMM itself.
+#
+# Runs exactly one step, `treearhmm.steps.fit`, plus `models/tarhmm.py`.
+# Everything scientific comes from pip -- conda supplies only the interpreter.
+#
+# AFTER creating this environment you MUST run:
+#
+#     conda run -n treeHMM_env pip uninstall -y tensorflow-probability
+#     conda run -n treeHMM_env pip install tfp-nightly
+#
+# `dynamax` depends on stable `tensorflow-probability`, which is too old for
+# current JAX and fails at import with
+#   AttributeError: module 'jax.interpreters.xla' has no attribute 'pytype_aval_mappings'
+# Both distributions provide the same `tensorflow_probability` import path, so
+# listing tfp-nightly below would not reliably win the resolve -- the stable one
+# has to be removed afterwards.  See env_setup.md.
+#
+# For a CPU-only build, change `jax[cuda12]==0.10.1` to `jax==0.10.1`.
+# The GPU build needs an NVIDIA driver >= 525; the CUDA libraries themselves
+# arrive as pip wheels, so no system CUDA toolkit is required.
+
+name: treeHMM_env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+    - dynamax==1.0.1
+    - jax[cuda12]==0.10.1
+    - jaxlib==0.10.1
+    - optax==0.2.8
+    - jaxtyping==0.3.10
+    - fastprogress==1.1.6
+    - scikit-learn==1.9.0
+    - numpy==2.4.6
+    - PyYAML==6.0.3

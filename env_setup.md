@@ -10,7 +10,7 @@ This project spans **three conda environments**. Use the right one for each task
 
 > There is **no env named `occident`** — earlier revisions of this file and of the
 > archived scripts said so and were wrong. `AnalysisEnv` also exists but is Python 3.14
-> and unrelated to this project. `treearhmm doctor` checks that all three names in
+> and unrelated to this project. `python -m treearhmm doctor` checks that all three names in
 > `configs/site.yml` resolve.
 
 > **Cross-environment hazard.** The three envs are on numpy 1.26.4 / 2.4.2 / 2.4.6 and
@@ -122,18 +122,20 @@ The setup above was verified end-to-end (model imports, 10 iterations of EM on s
 
 ## Running the model
 
-The pipeline switches environments per step automatically:
+The pipeline switches environments per step automatically. The package is not
+pip-installed, so run the CLI as a module from the repo root, in conda `base`:
 
 ```bash
-treearhmm doctor                      # check all three envs, paths, CUDA
-treearhmm run configs/_smoke.yml      # one crop, no DINO, ~1 minute
+python -m treearhmm doctor                      # check all three envs, paths, CUDA
+python -m treearhmm run configs/_smoke.yml      # one crop, no DINO, ~1 minute
 ```
 
-To run one step by hand in its own environment:
+To run one step by hand in its own environment (it is stamp-guarded like the
+driver, so pass `--force` to redo a step that is already current):
 
 ```bash
-conda run --no-capture-output -n treeHMM_env \
-  python -m treearhmm.steps.fit --run-dir analysis/runs/_smoke
+PYTHONPATH=$PWD conda run --no-capture-output -n treeHMM_env \
+  python -m treearhmm.steps.fit --run-dir analysis/runs/_smoke --force
 ```
 
 Before the first run, set the absolute paths in `configs/site.yml` (`repo_root`,
@@ -146,6 +148,9 @@ Before the first run, set the absolute paths in `configs/site.yml` (`repo_root`,
 - The A30s here are **not** MIG-partitioned. JAX grabs **GPU 0 by default** and pre-allocates most of its memory.
 - To pick a specific GPU (e.g. if GPU 0 is busy), set `CUDA_VISIBLE_DEVICES`:
   ```bash
-  CUDA_VISIBLE_DEVICES=1 conda run --no-capture-output -n treeHMM_env python scripts/cvat_gt_crops/fit_arhmm.py
+  CUDA_VISIBLE_DEVICES=1 PYTHONPATH=$PWD conda run --no-capture-output -n treeHMM_env \
+    python -m treearhmm.steps.fit --run-dir analysis/runs/_smoke --force
   ```
+  For a normal run, set `hardware.cuda_visible_devices` in `configs/site.yml`
+  instead — the CLI applies it to every step it spawns.
 - To cap JAX's memory pre-allocation, set `XLA_PYTHON_CLIENT_MEM_FRACTION=0.5` (or `XLA_PYTHON_CLIENT_PREALLOCATE=false`).
