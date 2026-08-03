@@ -9,92 +9,181 @@ An implementation of a **Tree Autoregressive Hidden Markov Model (Tree AR-HMM)**
 See `README.md` for the full probabilistic model and `Derivation/` for the forward–backward math.
 
 ## Input Data
-- Well IDs: ['B8', 'B4', 'E4']
 - Phase Image Cell Tracks: `/gladstone/engelhardt/lab/MarsonLabIncucyteData/groundTruthTracks/TCR-T/<well_id>/<well_id>_<slice_id>/ALL_tracks.tiff`
     - shape (T, Y, X)
     - includes tracks for both cancer and T cells, cancer cells identified by `/gladstone/engelhardt/lab/MarsonLabIncucyteData/groundTruthTracks/TCR-T/<well_id>/<well_id>_<slice_id>/ALL_cancer_ids.pkl`
 - Cancer Nuclei Tracks: `/gladstone/engelhardt/lab/MarsonLabIncucyteData/groundTruthCalibanTracks/<well_id>_<slice_id>.tiff`
     - shape (T, Y, X)
-    - includes only cancer cell nuclei
-- Raw Phase image: 
+- Raw Phase image: `/gladstone/engelhardt/lab/MarsonLabIncucyteData/TrackingCrops/CarnevaleRepStim/<well_id>/<well_id>_<slice_id>/B4_t50t100y200y350x750x900/crop.tiff`
     - shape (T, Y, X, 2)
         - in last channel, 0 is RFP intensity, 1 is phase image
-- Conditions: 
-    - SH: ['B3', 'B4', 'B5', 'B6']
-    - RASA2: ['E3', 'E4', 'E5', 'E6']
-    - CUL5: ['B7', 'B9', 'B10']
 
-## Layout
-- `models/tarhmm.py` — the entire model. Custom forward–backward inference plus a `tARHMM` class subclassing Dynamax's `LinearAutoregressiveHMM`.
-- `tree_input.md` — **the binding contract** for what the fit step hands the model: the six arrays, their shapes and dtypes, mask semantics, and the preprocessing order. Read this before touching the fit step.
-- `treearhmm/` — the pipeline package. **Read `treearhmm/README.md`** before changing it: it covers the step chain, the config layering, determinism, and the three ways to extend the pipeline (a track feature is one decorated function, a modality is one provider plus a step, an extra is one module).
-- `configs/` — run configurations. `site.yml` (paths, envs, crops) ← `default.yml` (experiment defaults) ← one file per run.
-- `utils.py` — `generate_tree_hmm_data()` (synthetic lineage data) and `visualize_lineage()`. Used only by notebooks and tests.
-- `notebooks/` — exploratory runs. `tree_arhmm.ipynb` at root is the main scratch notebook.
-- `analysis/` — **gitignored.** All pipeline output: `analysis/runs/<run_name>/` and the content-addressed `analysis/cache/`. Nothing here is committed.
-- `scripts/archive/`, `analysis/archive/` — the eight superseded per-experiment pipelines and their outputs. Reference only; do not extend them.
+## The pipeline
 
-There is no `pip install` of this repo. `pyproject.toml` is inherited from Dynamax and describes *dynamax*, not this package. The CLI puts the repo root on `PYTHONPATH` when it spawns each step, which is what makes both `treearhmm` and `from models.tarhmm import tARHMM` importable in whichever env that step runs in.
+**The YAML file defines an experiment run**.
 
-**`.gitignore` note:** lines 17–18 are `/lib/` and `/lib64/`, deliberately anchored. Unanchored `lib/` matches at any depth and once silently swallowed an entire package directory. Do not un-anchor them, and do not name a package directory `lib`.
+| step | env role | conda env | output |
+|---|---|---|---|
+| `features` | imaging | `OccidentAnalysis` | per-cell, per-frame track features (**cached**) |
+| `dino` | dino | `cs229Dino` | DINOv2 embeddings of centroid patches (**cached**) |
+| `pca` | dino | `cs229Dino` | joint PCA → top-k components (**cached**) |
+| `fit` | model | `treeHMM_env` | fitted AR-HMM + posteriors (run-local) |
+| `outputs` | imaging | `OccidentAnalysis` | the four base outputs (run-local) |
+| `extras` | imaging | `OccidentAnalysis` | opt-in extras (run-local, optional) |
+
+`dino`/`pca` are dropped from the chain entirely unless `model.use_dino_pcs: true`; `extras` is
+dropped when `outputs.extras` is empty.
+
+Cached steps are content-addressed under `analysis/cache/<step>/<key>/` and shared across
+runs, so a sweep over `model.*` recomputes only `fit` onward. Use `--force`
+to redo a step whose key has not changed.
+
+`treearhmm/README.md` is the detailed reference (determinism rules, cache keys,
+provider abstraction); `env_setup.md` covers building `treeHMM_env`.
+
+## Run Existing Experiment
+
+The package is **not pip-installed**. Run it as a module from the repo root
+(`/gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/treeHMM`); the CLI itself only
+needs PyYAML + numpy, so the conda `base` env is fine — it spawns each step in the
+right env itself.
+
+```bash
+cd /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/treeHMM
+
+python -m treearhmm doctor configs/runs/dino_k3.yml     # envs, paths, CUDA, npz round-trip
+python -m treearhmm list   configs/_smoke.yml           # run directories under output_root
+python -m treearhmm show   configs/runs/dino_k3.yml     # fully resolved config
+python -m treearhmm status configs/runs/dino_k3.yml     # which steps are current, and why
+python -m treearhmm run --dry-run configs/runs/dino_k3.yml
+python -m treearhmm run    configs/runs/dino_k3.yml
+```
+
+Results land in `analysis/runs/<run_name>/`:
+
+```
+config.resolved.yml            frozen copy; the sole input to every step
+manifest.yml                   commit, host, per-step env / key / timing / status
+_stamps/<step>.json            run-local step completion
+logs/<step>.log
+features -> ../../cache/features/<key>      symlink; likewise dino/, pca/
+fit/                           fit_summary.yml, cell_index.csv, and the .npy/.npz arrays
+outputs/
+  overlays/<crop>_state_overlay.mp4         cancer cells tinted by state
+  feature_distributions.png                 every cached feature, per state
+  state_feature_summary.csv
+  transition_matrix.csv / .png
+  initial_distribution.csv
+  state_assignments.csv                     one row per inferred cell-frame
+  state_assignments_per_cell.csv
+  extras/<name>/
+```
+
+To debug one step by hand, in its own environment — it reads `config.resolved.yml`
+and nothing else, so this is identical to what the driver does:
+
+```bash
+PYTHONPATH=$PWD conda run --no-capture-output -n treeHMM_env \
+  python -m treearhmm.steps.fit --run-dir analysis/runs/dino_k3
+```
+
+## Create New Features
+
+**A track feature is one decorated function in `treearhmm/core/trackfeatures.py`.**
+Nothing else changes: config validation, the emission vector, the plots, the CSV
+headers and the held-out diagnostics all read `FEATURE_REGISTRY`.
+
+```python
+@per_frame("my_feature", units="px^2", doc="one sentence, shown as the plot subtitle",
+           uses=("neighbor_radius_px",), needs_image=False, bounds=(0.0, 1.0))
+def _my_feature(fb):                    # fb: FrameBundle -> (N,) float, NaN where absent
+    return fb.prop("area") * 2
+
+@temporal("my_delta", units="", depends=("area",), uses=("window_frames",),
+          doc="one sentence")
+def _my_delta(sb):                      # sb: SeriesBundle -> (T, N) float
+    return sb.values["area"] - sb.prev("area")
+```
+
+Four rules that are load-bearing:
+
+1. **Never loop over cells for regionprops.** A `FrameBundle` already holds one
+   `regionprops_table` call for the whole frame; use `fb.prop(...)`.
+2. **Temporal features step over a cell's *active* frames.** `SeriesBundle` exposes only
+   `prev`, `gap`, `window`, `displacement`, `prev_centroids` — there is deliberately no
+   `t - 1` indexing, because a tracking gap would otherwise look like a teleport.
+3. **Keep imports light.** This module is imported by `treearhmm.config`, hence by every
+   step in all three envs — only one of which has scikit-image. Import skimage *inside*
+   the function (see `_dilated_t_cell_neighbors`).
+4. If you change an **existing** feature's math, hand-bump `version` on the `features`
+   `Step` in `treearhmm/layout.py`. Adding a new feature needs no bump — it changes
+   `computed_features`, so the cache key moves on its own.
+
+Then use it: `features.compute: all` picks it up automatically; add the name to
+`model.features` in a run config to feed it to the model. Anything computed but not in
+`model.features` is kept as a **held-out diagnostic** and still appears in the
+distribution figure — that is what makes a state description checkable.
+
+Verify with `tests/test_features.py` (`python -m unittest discover -s tests -t tests`)
+and a smoke run.
+
+Bigger additions, documented in `treearhmm/README.md`:
+- **A whole modality** (GPU, own env, k anonymous dimensions): a `Provider` in
+  `treearhmm/core/providers.py` plus a step in `treearhmm/steps/` registered in
+  `layout.STEPS`. `steps/fit.py` needs no change.
+- **A new output**: a module in `treearhmm/extras/` exposing `REQUIRES` and
+  `run(cfg, layout, out_dir)`. Discovery is by filename; keep module-level imports
+  light because config validation imports it just to read `REQUIRES`.
+
+## Create New Experiment Run
+
+Add one small YAML file under `configs/runs/` carrying **only what it does
+differently**, then run it.
+
+```yaml
+# configs/runs/dino_k5.yml
+extends: dino_k3.yml            # resolved relative to THIS file; ultimately -> default.yml -> site.yml
+run_name: dino_k5               # the directory under analysis/runs/; ^[A-Za-z0-9_][A-Za-z0-9_.-]*$
+description: As dino_k3, five states.
+model:
+  num_states: 5
+```
+
+`extends` is a path relative to the extending file's own directory.
+
+```bash
+python -m treearhmm run --dry-run configs/runs/dino_k5.yml   # see what is cached vs. RUN
+python -m treearhmm run           configs/runs/dino_k5.yml
+```
+
+Rules worth knowing before you write the file:
+
+- **Merge rule: mappings merge key by key; every other type, including lists, is
+  replaced wholesale.** `model: {features: [area]}` yields exactly `[area]`, not the
+  inherited list plus `area`. `null` deletes an inherited key. So **check what you are
+  inheriting before overriding a list** — `python -m treearhmm show <config>` prints the
+  resolved document. The usual trap: `_smoke.yml` already sets
+  `outputs.extras: [state_timeline, condition_stats]` and `features.compute` to an explicit
+  five-feature list, so a child writing `extras: [state_timeline]` silently *drops*
+  `condition_stats` rather than adding anything.
+- `run_name` must be unique — reusing a run directory with a different config is
+  refused unless you pass `--allow-config-change`.
+- `configs/site.yml` holds paths, the six crop ids, condition groupings and the conda env
+  names. Edit it only to move the repo to another checkout or machine — changing it
+  invalidates caches. Nothing in it is an experimental knob.
+- `model.em_seeds` is the **only** randomness surface: EM runs once per seed, best final
+  log probability wins (ties to the lowest seed), and every seed is recorded in
+  `fit/fit_summary.yml`.
 
 ## Conda environments
 
-The pipeline spans three environments and you must use the right one:
+Three environments, one per step role, named in `configs/site.yml` under `envs:`. The
+CLI switches between them automatically; you only name one when running a step by hand.
 
-- **`treeHMM_env`** — JAX / Dynamax / the model. Anything touching `models/tarhmm.py`. Python 3.11.15, jax 0.10.1 (sees both A30s), dynamax 1.0.1, numpy 2.4.6. **Gotcha:** `pip install dynamax` pulls *stable* `tensorflow-probability`, too old for current JAX (import fails on `jax.interpreters.xla.pytype_aval_mappings`); it must be replaced with `tfp-nightly`.
-- **`OccidentAnalysis`** — microscopy I/O, feature extraction, plotting, video. Python 3.11.9, numpy 1.26.4, skimage 0.23.2, tifffile, pandas 2.1.4, matplotlib 3.8.2, imageio + ffmpeg.
-- **`cs229Dino`** — DINOv2 embedding and PCA. torch 2.5.1 (CUDA), transformers 5.2.0, sklearn 1.8.0, numpy 2.4.2.
+| role | env | used for | key versions |
+|---|---|---|---|
+| `imaging` | `OccidentAnalysis` | `features`, `outputs`, `extras` | py 3.11.9, numpy 1.26.4, skimage 0.23.2, matplotlib 3.8.2, imageio+ffmpeg, tifffile |
+| `dino` | `cs229Dino` | `dino`, `pca` | py 3.11, torch 2.5.1 (CUDA), transformers 5.2.0, sklearn 1.8.0, numpy 2.4.2 |
+| `model` | `treeHMM_env` | `fit` | py 3.11.15, jax 0.10.1 (cuda12), dynamax 1.0.1, tfp-nightly, numpy 2.4.6 |
 
-There is **no env named `occident`** — older docs and scripts say so and are wrong. `AnalysisEnv` exists but is Python 3.14 and unrelated.
-
-**Cross-environment hazard:** the three envs are on numpy 1.26.4 / 2.4.2 / 2.4.6 and pass arrays to each other as `.npz`. Plain numeric and bool arrays round-trip; object arrays and pickled payloads do not. Rule: numeric/bool arrays only, `allow_pickle=False` on every load, all strings in JSON sidecars.
-
-## Running the pipeline
-
-```bash
-treearhmm run configs/_smoke.yml      # one crop, no DINO, ~1 minute
-treearhmm status configs/_smoke.yml   # which steps are current and why
-treearhmm doctor                      # envs, paths, CUDA, npz round-trip
-```
-
-One YAML defines one run. Steps run in a fixed chain, each in its own env, and each is independently runnable: `python -m treearhmm.steps.<name> --run-dir <dir>`. Shared steps (`features`, `dino`, `pca`) are content-addressed into `analysis/cache/` and reused by any run with the same inputs; `fit`, `outputs` and `extras` are run-local.
-
-Change behaviour in the config, never in the scripts. Sweeps are several small configs sharing a base via `extends:`.
-
-There are no automated tests yet beyond `tests/` (unit tests for config, lineage, features and the npz round-trip); the smoke config is the end-to-end regression check.
-
-## Model architecture — key concepts to know before editing `models/tarhmm.py`
-
-> **The pipeline does not use the tree.** Divisions are out of scope: `treearhmm`
-> builds `is_division_mask` all-False and `parent_indices` always self, so every cell
-> is an independent chain, `P_div` is never exercised, and `ALL_graph.pkl` is not read.
-> The section below describes the model's full capability, which the pipeline uses only
-> the non-division half of. Do not add division handling to the pipeline without
-> changing `tree_input.md` first.
-
-**Data is a dense `(T, MAX_CELLS, D)` tensor with one fixed column per unique cell.** Columns are never reused: a cell that dies leaves its column inactive forever; a division ends the parent's column and allocates two new columns. Everything is driven by per-`(t, cell)` boolean/index masks that travel together through every function:
-- `active_mask` — cell exists/observed at `(t, cell)`.
-- `parent_indices` — for each `(t, cell)`, the column index of its parent at `t-1` (self if persisting, the dividing parent if a division child, dummy `0` for new roots).
-- `is_division_mask` — `(t, cell)` is a division child (use `P_div`, and AR input is zeroed).
-- `is_new_root_mask` — first frame a cell appears spontaneously (reset to the initial distribution; argmax over time gives each root's first frame for the initial-state stats).
-
-**Two transition matrices.** `P_std` (persistence) and `P_div` (division), carried as the tuple `(P_std, P_div)`. Inference picks per-edge via `is_division_mask`. They have parallel parameter/M-step components: `TreeTransitions` + `HMMDivisionTransitions`, with `division_transitions` as a first-class field in `ParamsLinearTreeARHMM` alongside `initial`, `transitions`, `emissions`.
-
-**Custom forward–backward** (not Dynamax's) lives in module-level jitted functions: `tree_hmm_filter`, `tree_hmm_backward_filter`, `tree_hmm_two_filter_smoother`, and `_compute_sum_transition_probs`. The filter/smoother are vmapped over cells per timestep; messages flow along `parent_indices` (children scatter messages up to parents in the backward pass). New roots are re-seeded with the initial distribution; inactive cells are masked to zero. Returns a `TreeHMMPosterior` (adds `division_trans_probs` to the standard fields).
-
-**Emissions support `num_lags=0`** (degenerates to a Gaussian HMM, bias-only — the current default in `config.yml`) and `num_lags=1`. `TreeARHMMEmissions._compute_conditional_logliks` flattens `(T, C, D) → (T·C, D)` to reuse Dynamax's vectorized likelihood. `num_lags > 1` is explicitly **not implemented** (`compute_inputs` raises). The emission M-step adds ridge/jitter regularization and guards dead states (`sum_w` near zero) to avoid NaNs.
-
-**AR inputs are precomputed**, not derived inside the model: call `arhmm.compute_inputs(emissions, parent_indices, is_division_mask, is_new_root_mask, active_mask)` to build the lagged-parent-observation tensor, then pass the result into `fit_em` / the smoother. Division children and inactive cells get zeroed inputs; new roots keep their first valid observation as input.
-
-**EM entry point:** `tARHMM.fit_em(params, props, emissions, inputs, parent_indices, is_division_mask, active_mask, is_new_root_mask, num_iters=...)`. It accepts a single `(T, C, D)` sequence or a batch (leading axis = independent files/crops); the E-step is vmapped over the batch and sufficient stats are summed before one M-step. `fit_em` closes over `props` from the enclosing scope. `sample()` is not implemented.
-
-To get state assignments after fitting, run `tree_hmm_two_filter_smoother(*arhmm._inference_args(...))` and take `argmax(posterior.smoothed_probs, axis=-1)`.
-
-### Gotchas
-
-- Inactive/padded cells carry zeros and NaNs by design; stats use `jnp.nansum` / explicit masking. Preserve this when changing reductions.
-- `models/tarhmm.py` sets `config.update("jax_disable_jit", False)` at import and has a commented-out debug toggle — leave jit on unless actively debugging.
-- The pipeline reindexes cells (`lineage.filter_short_cells`, `cells.min_frames`) and **remaps `parent_indices` accordingly**. Any code that filters columns must keep `parent_indices`, the masks, and emissions consistent, or inference breaks silently rather than loudly. `lineage.assert_consistent()` is called at the end of every column-space operation for exactly this reason — keep it that way.
-- `compute_inputs` and `fit_em` take the masks in **different orders** (`is_new_root_mask` before vs after `active_mask`). They are same-shaped booleans, so a swap runs happily and returns nonsense. Never call either positionally: go through the `MaskBundle` wrappers in `treearhmm/steps/fit.py`.
-- `initialize(method="kmeans", emissions=...)` wants a **2D array of active cell-frames only**, not the padded `(T, C, D)` tensor. Passing the 3D tensor lets padding zeros dominate the centroids, and once features are z-scored the model's norm-based padding detection stops working.
+- The CLI driver itself runs from any env with PyYAML + numpy
