@@ -16,15 +16,30 @@ non-zero ID.  `ALL_graph.pkl` is the division lineage, and is deliberately
 **not read**: the pipeline does not use the tree half of the model, so every
 cell is an independent chain (see `tree_input.md`).
 
-Two definitions of a cancer cell are contemplated:
+Two definitions of a cancer cell are implemented, chosen by `cells.source`:
 
     phase   Cancer cells are the ground-truth tracks listed in
             ALL_cancer_ids.pkl.  Masks cover the whole cell body, so shape
-            features describe the cell.  **This is the implemented source.**
+            features describe the cell.
 
     nuclei  Cancer cells are the Caliban nuclei tracks.  Cell identity is
             cleaner, but the masks are nuclei, so shape features describe the
-            nucleus.  Declared here as a seam; not implemented.
+            nucleus, and a fixed dilation radius reaches less far out of it.
+
+The Caliban nuclei live in a **flat** tree -- one file per crop, with no
+per-well directory level, unlike either tree above:
+
+    {caliban_tracks_dir}/{crop_id}.tiff   (T, H, W, 1) int64
+
+Caliban ran on the cancer nuclei only.  There is no T-cell equivalent and no
+`ALL_cancer_ids.pkl` analogue, so every non-zero label in that file is a cancer
+cell, and the T-cell masks still come from the CVAT stack under
+`cells.source: nuclei`.  That leaves a crop described by two unrelated ID
+spaces, and they are **never reconciled**: nothing here maps a nucleus label
+onto a CVAT track ID, by overlap or otherwise.  Nothing needs it.  `cell_ids` is
+whatever the chosen source calls its cancer cells, T cells are only ever counted
+as neighbours, and switching source swaps the label space whole -- for the
+features, the DINO patches, the fit and the overlays alike.
 
 The image comes from a different tree than the tracks:
 
@@ -106,6 +121,18 @@ def image_path(cfg: dict, crop_id: str) -> Path:
     return root / well_of(crop_id) / crop_id / "crop.tiff"
 
 
+def nucleus_tracks_path(cfg: dict, crop_id: str) -> Path:
+    """The crop's Caliban nucleus tracks.
+
+    Unlike the CVAT tracks and the image crops, these are stored flat: one
+    `{crop_id}.tiff` directly under the root, with no per-well directory level.
+    """
+    from arhmm.config import get_path
+
+    root = Path(get_path(cfg, "paths.caliban_tracks_dir"))
+    return root / f"{crop_id}.tiff"
+
+
 def _read_tiff(path: Path) -> np.ndarray:
     import tifffile
 
@@ -147,37 +174,26 @@ def normalize_stack(stack: np.ndarray, percentiles=DEFAULT_NORM_PERCENTILES) -> 
     return np.clip((stack.astype(np.float32) - low) / (high - low), 0.0, 1.0)
 
 
-def load_crop(cfg: dict, crop_id: str, *, with_image: bool = True) -> CropCells:
-    """Load one crop's cancer masks, T-cell masks, image and column order.
+def _load_cvat_tracks(cfg: dict, crop_id: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Read the CVAT stack and split its single ID space by cell type.
+
+    Both sources come through here: `phase` takes its cancer masks and column
+    order from this file, and `nuclei` still takes its T-cell masks from it,
+    because Caliban segmented the cancer nuclei only.
 
     Args:
         cfg (dict): resolved configuration.
-        crop_id (str): the crop to load.
-        with_image (bool): read and normalize `crop.tiff`.  Skipped when nothing
-            requested needs pixel intensities, which saves reading a 10 MB file
-            per crop.
+        crop_id (str): the crop to read.
 
     Returns:
-        CropCells: the loaded crop.
+        tuple[np.ndarray, np.ndarray, np.ndarray]: the `(T, H, W)` int32 cancer
+            stack, the `(T, H, W)` int32 T-cell stack, and the `(N,)` int32
+            sorted cancer IDs.
 
     Raises:
-        NotImplementedError: for `cells.source: nuclei`.
-        ValueError: if the tracks and image disagree on frame count, or if the
-            cancer ID list names IDs absent from the track stack.
+        ValueError: if the stack is not `(T, H, W)`, or if the cancer ID list
+            names IDs absent from the track stack.
     """
-    from arhmm.config import get_path
-
-    source = get_path(cfg, "cells.source")
-    if source == "nuclei":
-        raise NotImplementedError(
-            "cells.source: nuclei is a declared seam, not an implementation. "
-            "Add a loader here in arhmm/core/cells.py that reads "
-            "paths.caliban_tracks_dir and maps the cancer ID space onto nucleus "
-            "labels by maximum pixel overlap."
-        )
-    if source != "phase":
-        raise ValueError(f"unknown cells.source: {source!r}")
-
     crop_dir = ground_truth_dir(cfg, crop_id)
     tracks = _read_tiff(crop_dir / "ALL_tracks.tiff")
     if tracks.ndim != 3:
@@ -196,31 +212,147 @@ def load_crop(cfg: dict, crop_id: str, *, with_image: bool = True) -> CropCells:
         )
 
     # The single ID space is split into two label stacks so that downstream code
-    # never has to re-derive "which of these labels is a T cell".
+    # never has to re-derive "which of these labels is a T cell".  The check
+    # above stays live for `nuclei` too: that source ignores the cancer IDs as a
+    # column order, but the split below still depends on them being right, and a
+    # stale list would corrupt the T-cell masks silently.
     is_cancer = np.isin(tracks, cancer_ids)
     cancer = np.where(is_cancer, tracks, 0).astype(np.int32)
     tcells = np.where(is_cancer | (tracks == 0), 0, tracks).astype(np.int32)
+    return cancer, tcells, cancer_ids
 
-    image = None
-    if with_image:
-        raw = _read_tiff(image_path(cfg, crop_id))
-        if raw.ndim != 4 or raw.shape[-1] < 2:
-            raise ValueError(f"{crop_id}: expected (T, H, W, 2) crop.tiff, got {raw.shape}")
-        if raw.shape[0] != tracks.shape[0]:
-            raise ValueError(
-                f"{crop_id}: crop.tiff has {raw.shape[0]} frames but ALL_tracks.tiff has "
-                f"{tracks.shape[0]}; these are different acquisitions"
-            )
-        if raw.shape[1:3] != tracks.shape[1:3]:
-            raise ValueError(
-                f"{crop_id}: crop.tiff is {raw.shape[1:3]} but the tracks are "
-                f"{tracks.shape[1:3]}; the image is not aligned with the tracks"
-            )
-        percentiles = tuple(get_path(cfg, "features.params.norm_percentiles",
-                                     DEFAULT_NORM_PERCENTILES))
-        image = np.stack(
-            [normalize_stack(raw[..., 0], percentiles), normalize_stack(raw[..., 1], percentiles)],
-            axis=-1,
+
+def _load_nucleus_tracks(cfg: dict, crop_id: str) -> tuple[np.ndarray, np.ndarray]:
+    """Read the crop's Caliban nucleus tracks and the labels in them.
+
+    Every non-zero label is a cancer nucleus -- Caliban never saw the T cells --
+    so unlike the CVAT stack there is no ID list to consult and nothing to
+    filter out.
+
+    Args:
+        cfg (dict): resolved configuration.
+        crop_id (str): the crop to read.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: the `(T, H, W)` int32 nucleus label stack
+            and the `(N,)` int32 sorted non-zero labels -- the column order.
+
+    Raises:
+        ValueError: if the stack is neither `(T, H, W)` nor `(T, H, W, 1)`.
+    """
+    path = nucleus_tracks_path(cfg, crop_id)
+    nuclei = _read_tiff(path)
+    # Caliban writes a trailing singleton channel axis.  Dropping it here rather
+    # than in every consumer is what lets `CropCells.cancer` mean one shape
+    # whatever the source.
+    if nuclei.ndim == 4 and nuclei.shape[-1] == 1:
+        nuclei = nuclei[..., 0]
+    if nuclei.ndim != 3:
+        raise ValueError(
+            f"{crop_id}: expected (T, H, W) or (T, H, W, 1) nucleus tracks in "
+            f"{path.name}, got shape {nuclei.shape}"
         )
+    # int64 on disk, but the labels number in the tens and every other label
+    # stack in this package is int32.
+    nuclei = nuclei.astype(np.int32, copy=False)
 
-    return CropCells(crop_id=crop_id, cancer=cancer, tcells=tcells, image=image, cell_ids=cancer_ids)
+    labels = np.unique(nuclei)
+    return nuclei, labels[labels > 0].astype(np.int32, copy=False)
+
+
+def _load_image(cfg: dict, crop_id: str, ref_shape: tuple, ref_name: str) -> np.ndarray:
+    """Read `crop.tiff` and normalize both channels over the whole stack.
+
+    Args:
+        cfg (dict): resolved configuration.
+        crop_id (str): the crop to read.
+        ref_shape (tuple): `(T, H, W)` of the cancer label stack the image has
+            to line up with.
+        ref_name (str): that stack's file name, so the error says which of the
+            two track sources the image disagrees with.
+
+    Returns:
+        np.ndarray: `(T, H, W, 2)` float32 in [0, 1], channel 0 RFP, 1 phase.
+
+    Raises:
+        ValueError: if the file is not `(T, H, W, 2)`, or if it disagrees with
+            `ref_shape` on frame count or frame size.
+    """
+    from arhmm.config import get_path
+
+    raw = _read_tiff(image_path(cfg, crop_id))
+    if raw.ndim != 4 or raw.shape[-1] < 2:
+        raise ValueError(f"{crop_id}: expected (T, H, W, 2) crop.tiff, got {raw.shape}")
+    if raw.shape[0] != ref_shape[0]:
+        raise ValueError(
+            f"{crop_id}: crop.tiff has {raw.shape[0]} frames but {ref_name} has "
+            f"{ref_shape[0]}; these are different acquisitions"
+        )
+    if raw.shape[1:3] != ref_shape[1:3]:
+        raise ValueError(
+            f"{crop_id}: crop.tiff is {raw.shape[1:3]} but the tracks are "
+            f"{ref_shape[1:3]}; the image is not aligned with the tracks"
+        )
+    percentiles = tuple(get_path(cfg, "features.params.norm_percentiles",
+                                 DEFAULT_NORM_PERCENTILES))
+    return np.stack(
+        [normalize_stack(raw[..., 0], percentiles), normalize_stack(raw[..., 1], percentiles)],
+        axis=-1,
+    )
+
+
+def load_crop(cfg: dict, crop_id: str, *, with_image: bool = True) -> CropCells:
+    """Load one crop's cancer masks, T-cell masks, image and column order.
+
+    The two sources differ in exactly one thing: where the cancer masks and the
+    column order come from.  The T-cell masks are the CVAT non-cancer IDs either
+    way, and the image is the same file either way.
+
+    Args:
+        cfg (dict): resolved configuration.
+        crop_id (str): the crop to load.
+        with_image (bool): read and normalize `crop.tiff`.  Skipped when nothing
+            requested needs pixel intensities, which saves reading a 10 MB file
+            per crop.
+
+    Returns:
+        CropCells: the loaded crop.
+
+    Raises:
+        ValueError: for an unknown `cells.source`; if the cancer ID list names
+            IDs absent from the track stack; or if the nucleus stack, the CVAT
+            stack and `crop.tiff` disagree on frame count or frame size.
+    """
+    from arhmm.config import get_path
+
+    source = get_path(cfg, "cells.source")
+    if source not in ("phase", "nuclei"):
+        raise ValueError(f"unknown cells.source: {source!r}")
+
+    # Read unconditionally: `phase` gets its cancer masks here, and `nuclei` gets
+    # its T cells here, since Caliban has no T-cell equivalent.
+    cvat_cancer, tcells, cvat_cancer_ids = _load_cvat_tracks(cfg, crop_id)
+
+    if source == "phase":
+        cancer, cell_ids, ref_name = cvat_cancer, cvat_cancer_ids, "ALL_tracks.tiff"
+    else:
+        cancer, cell_ids = _load_nucleus_tracks(cfg, crop_id)
+        ref_name = nucleus_tracks_path(cfg, crop_id).name
+        # The nucleus labels and the CVAT IDs are unrelated ID spaces and stay
+        # that way.  All that has to hold is that the two files describe the same
+        # pixels, or the T-cell neighbour features would be measuring distances
+        # in someone else's field of view.
+        if cancer.shape[0] != cvat_cancer.shape[0]:
+            raise ValueError(
+                f"{crop_id}: {ref_name} has {cancer.shape[0]} frames but ALL_tracks.tiff "
+                f"has {cvat_cancer.shape[0]}; these are different acquisitions"
+            )
+        if cancer.shape[1:3] != cvat_cancer.shape[1:3]:
+            raise ValueError(
+                f"{crop_id}: {ref_name} is {cancer.shape[1:3]} but the CVAT tracks are "
+                f"{cvat_cancer.shape[1:3]}; the nucleus masks are not aligned with the "
+                f"T-cell masks"
+            )
+
+    image = _load_image(cfg, crop_id, cancer.shape, ref_name) if with_image else None
+    return CropCells(crop_id=crop_id, cancer=cancer, tcells=tcells, image=image, cell_ids=cell_ids)

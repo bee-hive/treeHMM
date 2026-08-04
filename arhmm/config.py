@@ -59,9 +59,6 @@ INIT_METHODS = ("kmeans", "prior", "random")
 #: `rfp` can use the red channel only because `masks` is not.
 PATCH_OVERLAYS = ("rfp", "masks", "none")
 
-#: Features that describe a whole cell body and are meaningless on a nucleus mask.
-_BODY_SHAPE_FEATURES = frozenset({"solidity", "extent", "aspect_ratio", "eccentricity"})
-
 
 class ConfigError(Exception):
     """A configuration is malformed, contradictory, or names something unknown."""
@@ -375,6 +372,24 @@ def feature_params(cfg: dict) -> dict:
     return {name: params.get(name) for name in sorted(used)}
 
 
+def caliban_dir_if_read(cfg: dict) -> str | None:
+    """`paths.caliban_tracks_dir`, but only when the run actually opens it.
+
+    Returning None under `cells.source: phase` is what keeps the Caliban root out
+    of a phase run's cache key: `layout` drops a derived key that resolves to
+    None, so repointing a directory nothing reads invalidates nothing.
+
+    Args:
+        cfg (dict): resolved configuration.
+
+    Returns:
+        str | None: the directory under `cells.source: nuclei`, else None.
+    """
+    if get_path(cfg, "cells.source", None) != "nuclei":
+        return None
+    return get_path(cfg, "paths.caliban_tracks_dir", None)
+
+
 def uses_dino(cfg: dict) -> bool:
     """Whether this run feeds DINO principal components to the model."""
     return bool(get_path(cfg, "model.use_dino_pcs", False))
@@ -523,14 +538,6 @@ def validate(cfg: dict) -> None:
 
     computed = computed_features(cfg)
 
-    if source == "nuclei":
-        body_only = sorted(_BODY_SHAPE_FEATURES.intersection(computed))
-        if body_only:
-            raise ConfigError(
-                f"cells.source is 'nuclei', so these whole-cell shape features "
-                f"describe a nucleus rather than a cell and are rejected: {body_only}"
-            )
-
     # ---- model ---------------------------------------------------------- #
     model_features = get_path(cfg, "model.features", [])
     if not isinstance(model_features, list):
@@ -635,7 +642,13 @@ def validate_inputs(cfg: dict) -> list[str]:
     """
     problems: list[str] = []
 
-    for key in ("ground_truth_tracks_dir", "image_crops_dir"):
+    # The CVAT tracks are read whatever the source: `nuclei` still takes its
+    # T cells from them.
+    roots = ["ground_truth_tracks_dir", "image_crops_dir"]
+    reads_nuclei = get_path(cfg, "cells.source", None) == "nuclei"
+    if reads_nuclei:
+        roots.append("caliban_tracks_dir")
+    for key in roots:
         directory = Path(get_path(cfg, f"paths.{key}", "") or "")
         if not directory.is_dir():
             problems.append(f"paths.{key} is not a directory: {directory}")
@@ -651,15 +664,20 @@ def validate_inputs(cfg: dict) -> list[str]:
         problems.append(f"paths.repo_root does not contain models/tarhmm.py: {repo_root}")
 
     # Crops: one directory per crop, holding the tracks and the aligned image.
+    # The Caliban nuclei are the exception -- flat, one file per crop.
     gt_root = Path(get_path(cfg, "paths.ground_truth_tracks_dir", "") or "")
     img_root = Path(get_path(cfg, "paths.image_crops_dir", "") or "")
+    caliban_root = Path(get_path(cfg, "paths.caliban_tracks_dir", "") or "")
     for crop in crop_ids(cfg):
         well = crop.split("_", 1)[0]
-        for candidate in (
+        candidates = [
             gt_root / well / crop / "ALL_tracks.tiff",
             gt_root / well / crop / "ALL_cancer_ids.pkl",
             img_root / well / crop / "crop.tiff",
-        ):
+        ]
+        if reads_nuclei:
+            candidates.append(caliban_root / f"{crop}.tiff")
+        for candidate in candidates:
             if not candidate.is_file():
                 problems.append(f"crop {crop}: missing {candidate}")
 

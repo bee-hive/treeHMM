@@ -17,7 +17,9 @@ description: Defaults only; not meant to be run directly.
 
 # which segmentation defines a "cell", and which cells are modelled at all
 cells:
-  # mask source: CVAT whole-body tracks, or Caliban nuclei (an unimplemented seam)
+  # mask source: CVAT whole-body tracks, or Caliban nuclei.  Swaps the label
+  # space whole -- features, DINO patches, fit and overlays -- so shape features
+  # and t_cell_neighbors are not comparable between the two.
   source: phase                          # [phase, nuclei]
 
   # drop cells observed for fewer than this many frames

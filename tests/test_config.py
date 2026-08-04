@@ -163,13 +163,21 @@ class Validation(unittest.TestCase):
         with self.assertRaisesRegex(C.ConfigError, "model_path"):
             C.validate(self.broken(mutate))
 
-    def test_nuclei_source_rejects_whole_cell_shape_features(self):
-        def mutate(c):
-            c["cells"]["source"] = "nuclei"
-            c["features"]["compute"] = ["area", "solidity"]
+    def test_nuclei_source_accepts_whole_cell_shape_features(self):
+        """`solidity` and friends are well-defined on a nucleus mask.
 
-        with self.assertRaisesRegex(C.ConfigError, "nucleus rather than a cell"):
-            C.validate(self.broken(mutate))
+        They simply describe a nucleus, which is what `cell_source` in the
+        features cache's `meta.json` records.  Rejecting them would make every
+        nuclei run under the default `features.compute: all` a config error.
+        """
+        for compute in (["area", "solidity"], "all"):
+            with self.subTest(compute=compute):
+                def mutate(c, compute=compute):
+                    c["cells"]["source"] = "nuclei"
+                    c["features"]["compute"] = compute
+                    c["model"]["features"] = ["area"]
+
+                C.validate(self.broken(mutate))
 
     def test_a_crop_cannot_be_in_two_conditions(self):
         crop = self.cfg["data"]["crop_ids"][0]
@@ -300,10 +308,32 @@ class CacheKeys(unittest.TestCase):
             ("a used feature param invalidates features downward",
              lambda c: c["features"]["params"].update(neighbor_radius_px=25),
              ["features", "fit", "outputs"]),
+            ("the caliban root does not matter to a phase run",
+             lambda c: c["paths"].update(caliban_tracks_dir="/elsewhere"), []),
+            ("the cell source invalidates features downward",
+             lambda c: c["cells"].update(source="nuclei"),
+             ["features", "fit", "outputs"]),
         ]
         for label, mutate, expected in cases:
             with self.subTest(label):
                 self.assertEqual(self.changed(mutate), expected)
+
+    def test_the_caliban_root_invalidates_only_the_source_that_reads_it(self):
+        """`cells.source: nuclei` is the only thing that opens that directory.
+
+        A phase run must not notice it move, or every existing cache would be
+        orphaned by a path nothing reads.
+        """
+        repoint = lambda c: c["paths"].update(caliban_tracks_dir="/elsewhere")  # noqa: E731
+        nuclei = copy.deepcopy(self.cfg)
+        nuclei["cells"]["source"] = "nuclei"
+        nuclei["model"]["use_dino_pcs"] = True
+        self.assertEqual(self.changed(repoint, base=nuclei),
+                         ["features", "dino", "pca", "fit", "outputs"])
+
+        phase = copy.deepcopy(self.cfg)
+        phase["model"]["use_dino_pcs"] = True
+        self.assertEqual(self.changed(repoint, base=phase), [])
 
     def test_dino_key_chain_propagates_downstream(self):
         cfg = copy.deepcopy(self.cfg)

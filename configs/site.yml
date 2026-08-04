@@ -26,8 +26,11 @@ paths:
   # comparing RFP-inside-mask ratios.  Do not reintroduce it.
   image_crops_dir: /gladstone/engelhardt/lab/MarsonLabIncucyteData/TrackingCrops/CarnevaleRepStim
 
-  # Read only by cells.source: nuclei, which is a declared seam and not yet
-  # implemented.  Kept here so the seam has somewhere to point.
+  # Caliban cancer-nuclei tracks, read only by cells.source: nuclei.  FLAT --
+  # one file per crop, with no per-well directory level:
+  #   {caliban_tracks_dir}/{crop_id}.tiff   (T, H, W, 1) int64
+  # Every non-zero label is a cancer nucleus; there is no T-cell equivalent, so
+  # a nuclei run still takes its T cells from the CVAT tracks above.
   caliban_tracks_dir: /gladstone/engelhardt/lab/MarsonLabIncucyteData/groundTruthCalibanTracks
 
   # Outputs.  Both are under analysis/, which is gitignored in its entirety.

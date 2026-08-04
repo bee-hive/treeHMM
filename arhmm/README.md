@@ -66,6 +66,14 @@ configs/runs/<x>.yml   only what this run does differently
 replaced wholesale.** A run writing `model: {features: [area]}` gets exactly
 `[area]`, not the defaults plus `area`. `null` deletes an inherited key.
 
+`cells.source` picks which segmentation defines a cell: `phase` (CVAT whole-body
+tracks) or `nuclei` (Caliban cancer nuclei). It swaps the label space whole --
+track features, centroids, DINO patches, the fit and the overlays all follow --
+and only `core/cells.py` branches on it. The two ID spaces are never reconciled;
+under `nuclei` the T-cell masks still come from the CVAT stack, because Caliban
+segmented the cancer nuclei only. Both sources hash into the `features` and
+`dino` keys, so the caches cannot mix.
+
 The resolved document is frozen into the run directory as
 `config.resolved.yml` *before anything executes*, and every step reads that. If
 `default.yml` changes tomorrow, a rerun of an existing run directory is still
@@ -243,6 +251,21 @@ checkable.
 - **`.gitignore` line 17 is `/lib/`, anchored on purpose.** Unanchored `lib/`
   matches at any depth and once silently swallowed an entire package directory.
   Do not un-anchor it, and do not name a package directory `lib`.
+- **A nuclei run and a phase run are not comparable feature by feature**, and
+  nothing in the code compensates for it:
+  - `dilated_t_cell_neighbors` dilates the subject mask by `dilate_radius_px`
+    and counts the T-cell labels it touches (`core/trackfeatures.py`). A nucleus
+    sits well inside the cell body, so at a fixed radius it systematically
+    undercounts relative to a phase mask. The same radius means a different
+    thing in the two runs.
+  - `area`, `circularity`, `solidity` and the rest describe a *nucleus* under
+    `cells.source: nuclei`, so a state description does not transfer between the
+    two sources. Provenance is recorded as `cell_source` in the features cache's
+    `meta.json`.
+  - Track counts and lengths differ substantially -- 14 nuclei against 16 CVAT
+    cancer ids in `B4_t50…`, 38 against 51 in `E4_t250…` -- so `cells.min_frames`
+    and `cells.warmup_frames` may want revisiting for a nuclei run. Their
+    defaults are tuned for `phase`.
 - Nothing imports `MarsonImagingPipeline`. The handful of helpers that were used
   from it are reimplemented in `core/viz.py`.
 

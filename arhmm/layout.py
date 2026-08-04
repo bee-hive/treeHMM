@@ -44,6 +44,8 @@ class Step:
         depends (tuple[str, ...]): dotted config paths this step's output
             depends on.  Anything not listed here can change without
             invalidating the step, so the list is a claim worth getting right.
+            A `_derived.*` entry resolving to None drops out of the key, which
+            is how an input only some configs read stays out of the others'.
         shared (bool): output is content-addressed into the cache and reusable
             across runs, rather than written into the run directory.
         optional (bool): the run continues if this step fails.
@@ -74,6 +76,7 @@ _DERIVED = {
     "_derived.computed_features": cfgmod.computed_features,
     "_derived.feature_params": cfgmod.feature_params,
     "_derived.emission_names": cfgmod.emission_names,
+    "_derived.caliban_tracks_dir": cfgmod.caliban_dir_if_read,
 }
 
 
@@ -86,6 +89,7 @@ STEPS: tuple[Step, ...] = (
             "paths.ground_truth_tracks_dir",
             "paths.image_crops_dir",
             "cells.source",
+            "_derived.caliban_tracks_dir",
             "_derived.crop_ids",
             "_derived.computed_features",
             "_derived.feature_params",
@@ -100,6 +104,7 @@ STEPS: tuple[Step, ...] = (
         depends=(
             "paths.image_crops_dir",
             "cells.source",
+            "_derived.caliban_tracks_dir",
             "_derived.crop_ids",
             "dino.model_id",
             "dino.patch_px",
@@ -197,7 +202,12 @@ def _depends_payload(cfg: dict, step: Step) -> dict:
     payload = cfgmod.subset(cfg, plain)
     for key in step.depends:
         if key in _DERIVED:
-            payload[key] = _DERIVED[key](cfg)
+            value = _DERIVED[key](cfg)
+            # A derived key resolving to None means this config never reads that
+            # input at all.  Recording it anyway would move the key of every run
+            # that never will -- which is the whole point of the distinction.
+            if value is not None:
+                payload[key] = value
     return payload
 
 
