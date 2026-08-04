@@ -64,7 +64,7 @@ dino:
   # The patch is greyscale phase with cell-type masks alpha-blended over it.
   # Blending rather than flat-filling keeps the phase texture (blebbing, halo)
   # visible inside the mask, which is most of what makes the embedding useful.
-  mask_alpha: 0.45
+  mask_alpha: 0.0
   subject_colour: [1.0, 0.0, 0.0]        # the cell being embedded
   other_cancer_colour: [0.0, 0.0, 1.0]   # other cancer cells in the patch
   tcell_colour: [0.0, 1.0, 0.0]
@@ -80,7 +80,7 @@ model:
   # D = len(model.features) + (dino.n_pcs if use_dino_pcs else 0)
   use_dino_pcs: false
 
-  num_states: 3
+  num_states: 5
   num_lags: 1                # 0 (Gaussian HMM, bias only) or 1; the model
                              # raises NotImplementedError above that
   standardize: true          # z-score per dimension over ACTIVE cell-frames only
