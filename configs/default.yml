@@ -3,113 +3,147 @@
 # A run config extends this file and overrides only what it does differently.
 # Merge rule: mappings merge key by key, but every other type -- INCLUDING LISTS
 # -- is replaced wholesale.  So a run writing `model: {features: [area]}` gets
-# exactly `[area]`, not this file's list plus `area`.  That is what makes a
-# narrowing override predictable.  A value of `null` deletes an inherited key.
+# exactly `[area]`, not this file's list plus `area`.  A value of `null` deletes
+# an inherited key.
 
+# config this one layers over, resolved relative to THIS file's directory
 extends: site.yml
 
-run_name: default
+# directory name under paths.output_root; must be unique across runs
+run_name: default                        # ^[A-Za-z0-9_][A-Za-z0-9_.-]*$
+
+# free-text note recorded in the resolved config and the manifest
 description: Defaults only; not meant to be run directly.
 
+# which segmentation defines a "cell", and which cells are modelled at all
 cells:
-  # phase  -- cancer cells are the ground-truth CVAT tracks named in
-  #           ALL_cancer_ids.pkl.  Masks cover the whole cell body, so shape
-  #           features describe the cell.
-  # nuclei -- the Caliban nuclei tracks.  A declared seam in core/cells.py;
-  #           not implemented, and rejected by config validation.
-  source: phase
+  # mask source: CVAT whole-body tracks, or Caliban nuclei (an unimplemented seam)
+  source: phase                          # [phase, nuclei]
 
-  # Drop cells observed for fewer than this many frames.  Short tracks are
-  # mostly fragments, and they dominate the state occupancy if kept.
-  min_frames: 10
+  # drop cells observed for fewer than this many frames
+  min_frames: 10                         # int > cells.warmup_frames
 
-  # Leading frames per cell excluded from inference.  HELD FIXED regardless of
-  # model.num_lags, so a lag-0 and a lag-1 run are scored over exactly the same
-  # cell-frames and their log probabilities are comparable.  Must be >= 1: every
-  # temporal feature is undefined on a cell's first active frame.
-  warmup_frames: 1
+  # leading frames per cell excluded from inference; held fixed across num_lags
+  warmup_frames: 1                       # int >= 1
 
+# per-cell, per-frame track features computed and cached by the `features` step
 features:
-  # `all` computes the whole registry.  Computing everything once means every
-  # run in a sweep shares one features cache, and -- more importantly -- it
-  # gives the per-state distributions features the model never saw.  A state
-  # characterised only by its own inputs is a tautology; the held-out features
-  # are what make the description checkable.
-  #
-  # An explicit list is allowed, but it only narrows what is cached; it does not
-  # make anything faster to fit.
-  compute: all
+  # which features to compute; `all` keeps held-out diagnostics for every run
+  compute: all                           # 'all' | list of registered feature names
 
+  # tuning constants read by individual features; only those used are hashed
   params:
-    neighbor_radius_px: 20   # centroid-to-centroid radius for *_neighbors
-    dilate_radius_px: 2      # disk radius for dilated_t_cell_neighbors
-    window_frames: 5         # trailing window for the win_std_* features
-    # Whole-stack percentile scaling for intensity features.  Never per frame:
-    # a single bright artifact would rescale that frame and turn an intensity
-    # feature (and, downstream, a leading DINO PC) into a clock.
-    norm_percentiles: [1.0, 99.0]
+    # centroid-to-centroid radius for the *_neighbors counts
+    neighbor_radius_px: 20               # float > 0, px
 
+    # disk radius used to dilate the mask for dilated_t_cell_neighbors
+    dilate_radius_px: 2                  # int >= 0, px
+
+    # trailing window length for the win_std_* features
+    window_frames: 5                     # int >= 2, frames
+
+    # whole-stack (never per-frame) intensity scaling; NOT in any cache key, so
+    # changing it needs `--force` on features and dino
+    norm_percentiles: [1.0, 99.0]        # [low, high], floats on [0.0, 100.0]
+
+# DINOv2 appearance embedding; consulted only when model.use_dino_pcs is true
 dino:
-  # Consulted only when model.use_dino_pcs is true.  There is no separate
-  # `dino.enabled`, so there is nothing that can disagree with the model config.
-  model_id: facebook/dinov2-base
+  # HuggingFace repo id; embed_dim adapts from the checkpoint's hidden_size
+  model_id: facebook/dinov2-base         # facebook/dinov2-{small,base,large,giant}
+
+  # local snapshot dir loaded with local_files_only; not in the cache key
   model_path: /gladstone/engelhardt/home/jadjasu/.cache/huggingface/hub/models--facebook--dinov2-base
 
-  patch_px: 50               # square window around the rounded centroid, edge-padded
-  n_pcs: 10
-  whiten: true               # required in practice: unwhitened, PC1 dwarfs PC10 and
-                             # kmeans init degenerates to a 1-D split on PC1
-  batch_size: 256            # throughput only; deliberately not in the cache key
+  # side length of the square patch cut around the rounded centroid, edge-padded
+  patch_px: 50                           # int > 0, px
 
-  # The patch is greyscale phase centred on the cancer cell, plus AT MOST ONE
-  # overlay.  The two are exclusive by construction, not by preference: RFP can
-  # take the red channel only because the cell-type masks are not using it.
-  #   rfp     RFP intensity added to the red channel at rfp_alpha; masks not drawn
-  #   masks   cell-type masks alpha-blended at mask_alpha; RFP unused
-  #   none    plain phase, neither overlay
-  # Under rfp and none the subject cell is marked only by being at the centre.
-  patch_overlay: none
+  # how many principal components of the embedding are fed to the model
+  n_pcs: 10                              # int >= 1
 
-  # Blending rather than flat-filling keeps the phase texture (blebbing, halo)
-  # visible inside the mask, which is most of what makes the embedding useful.
-  # NOTE: at 0.0, `patch_overlay: masks` renders plain phase -- raise this too.
-  mask_alpha: 0.0
-  subject_colour: [1.0, 0.0, 0.0]        # the cell being embedded
-  other_cancer_colour: [0.0, 0.0, 1.0]   # other cancer cells in the patch
-  tcell_colour: [0.0, 1.0, 0.0]
-  rfp_alpha: 0.3             # strength of the red RFP overlay
+  # whiten before PCA; unwhitened, PC1 dwarfs PC10 and kmeans init degenerates
+  whiten: true                           # [true, false]
 
+  # forward-pass batch size; throughput only, deliberately not in the cache key
+  batch_size: 256                        # int >= 1
+
+  # what is drawn over the greyscale phase patch; at most one overlay
+  patch_overlay: none                    # [none, masks, rfp]
+
+  # how much to alpha-blend the cell-type masks over the phase image
+  # at 0.0, `patch_overlay: masks` renders plain phase -- raise this too
+  mask_alpha: 0.0                        # float on [0.0, 1.0]
+
+  # mask colour for the cell being embedded
+  subject_colour: [1.0, 0.0, 0.0]        # [r, g, b], floats on [0.0, 1.0]
+
+  # mask colour for other cancer cells falling inside the patch
+  other_cancer_colour: [0.0, 0.0, 1.0]   # [r, g, b], floats on [0.0, 1.0]
+
+  # mask colour for T cells falling inside the patch
+  tcell_colour: [0.0, 1.0, 0.0]          # [r, g, b], floats on [0.0, 1.0]
+
+  # strength of the red RFP overlay under `patch_overlay: rfp`
+  rfp_alpha: 0.3                         # float on [0.0, 1.0]
+
+# the AR-HMM itself
 model:
-  # ORDERED.  This list, followed by the DINO PCs when use_dino_pcs is set, IS
-  # the emission vector and IS emission_names (tree_input.md section 3).
-  features: [area, circularity, velocity, t_cell_neighbors]
+  # ORDERED; this list then the DINO PCs is the emission vector, and features[0]
+  # is what states are sorted by
+  features: [area, circularity, velocity, t_cell_neighbors]   # registered feature names
 
-  # D = len(model.features) + (dino.n_pcs if use_dino_pcs else 0)
-  use_dino_pcs: false
+  # append the dino.n_pcs principal components to the emission vector
+  use_dino_pcs: false                    # [true, false]
 
-  num_states: 5
-  num_lags: 1                # 0 (Gaussian HMM, bias only) or 1; the model
-                             # raises NotImplementedError above that
-  standardize: true          # z-score per dimension over ACTIVE cell-frames only
-  init_method: kmeans        # kmeans | prior | random
-  init_stickiness: 0.9       # diagonal mass of the initial transition matrix
-  num_em_iters: 50
+  # number of latent discrete states
+  num_states: 5                          # int >= 2
 
-  # The ONLY randomness surface in the pipeline.  EM is run once per seed and
-  # the fit with the best final log probability is kept, ties broken by the
-  # lowest seed.  Everything else is a deterministic function of the resolved
-  # config plus the cached inputs.
-  em_seeds: [0, 1, 2]
+  # autoregressive order: 0 is a plain Gaussian HMM (bias only)
+  num_lags: 1                            # [0, 1]
 
+  # z-score each emission dimension over ACTIVE cell-frames only
+  standardize: true                      # [true, false]
+
+  # how the initial parameters are drawn before EM
+  init_method: kmeans                    # [kmeans, prior, random]
+
+  # diagonal mass of the initial transition and division-transition matrices
+  init_stickiness: 0.9                   # float on [0.0, 1.0]
+
+  # number of EM iterations per seed; there is no convergence-based early stop
+  num_em_iters: 50                       # int >= 1
+
+  # the only randomness surface: EM runs once per seed, best final log prob wins
+  em_seeds: [0, 1, 2]                    # non-empty list of distinct ints
+
+# figures, tables and videos written under analysis/runs/<run_name>/outputs/
 outputs:
+  # state-tinted overlay movies, one per crop
   video:
-    crops: all               # 'all' | 'none' | an explicit list of crop ids
-    fps: 2
-    figsize: [7, 7]
-    dpi: 160
-    label_cell_ids: true
+    # which crops to render
+    crops: all                           # 'all' | 'none' | ids from data.crop_ids
+
+    # playback rate of the written mp4
+    fps: 2                               # int >= 1
+
+    # matplotlib figure size
+    figsize: [7, 7]                      # [width, height], inches
+
+    # render resolution; figsize x dpi must stay constant across frames
+    dpi: 160                             # int >= 1
+
+    # draw each cell's track id at its mask centroid
+    label_cell_ids: true                 # [true, false]
+
+  # per-state distribution of every cached feature, plus the summary csv
   feature_distributions:
-    kind: violin             # violin | box
-    max_cols: 4
-    include: all             # every cached feature, not just what the model saw
-  extras: []                 # module names under arhmm/extras/
+    # plot style; anything other than `violin` falls back to a boxplot
+    kind: violin                         # [violin, box]
+
+    # maximum number of panels per row
+    max_cols: 4                          # int >= 1
+
+    # currently unused: the figure always plots every cached feature
+    include: all                         # inert; kept so the outputs key is stable
+
+  # opt-in extra outputs, discovered by filename under arhmm/extras/
+  extras: []                             # [condition_stats, dino_confounds, state_timeline]
