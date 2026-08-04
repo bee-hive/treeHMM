@@ -42,13 +42,12 @@ provider abstraction); `env_setup.md` covers building `treeHMM_env`.
 
 ## Run Existing Experiment
 
-The package is **not pip-installed**. Run it as a module from the repo root
-(`/gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/treeHMM`); the CLI itself only
+The package is **not pip-installed**. Run it as a module from the repo root; the CLI itself only
 needs PyYAML + numpy, so the conda `base` env is fine — it spawns each step in the
 right env itself.
 
 ```bash
-cd /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/treeHMM
+# inside the repo root
 
 python -m arhmm doctor configs/runs/dino_k5.yml     # envs, paths, CUDA, npz round-trip
 python -m arhmm list   configs/_smoke.yml           # run directories under output_root
