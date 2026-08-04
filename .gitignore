@@ -5,6 +5,7 @@ __pycache__/
 
 # CLAUDE helper files/folders
 prompts/
+scripts/
 
 # C extensions
 *.so

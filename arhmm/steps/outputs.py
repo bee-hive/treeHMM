@@ -1,9 +1,11 @@
-"""Step `outputs`: the four base outputs every run produces.
+"""Step `outputs`: the five base outputs every run produces.
 
     overlays/{crop}_state_overlay.mp4   each cancer cell tinted by its inferred
                                         state, over the phase image
     feature_distributions.png           distribution of every computed feature
     state_feature_summary.csv           within each state
+    state_age_histogram.png             state occupancy against cell age
+    state_age_histogram.csv
     transition_matrix.csv / .png        learned state transition probabilities
     initial_distribution.csv
     state_assignments.csv               per cell-frame state and probabilities
@@ -278,7 +280,306 @@ def write_feature_distributions(cfg: dict, fit: dict, out_dir: Path) -> list[Pat
 
 
 # --------------------------------------------------------------------------- #
-# 4. overlay videos
+# 4. state occupancy against cell age
+# --------------------------------------------------------------------------- #
+
+
+def cell_birth_frames(cfg: dict, layout, index: list[dict], active: np.ndarray) -> np.ndarray:
+    """The frame each cell's clock starts on, one per fit column.
+
+    Under the default anchor this is the first frame the cell is **observed at
+    all**, which is not its first inferred frame: `lineage.apply_warmup`
+    deactivates each cell's leading `cells.warmup_frames` frames, so the fit's
+    `active_mask` starts later than the track does.  The raw presence matrix
+    survives in the features cache, and `cell_index.csv` carries `crop_idx`
+    straight into that crop's column order, so no cell-id matching is needed.
+
+    Args:
+        cfg (dict): resolved configuration.
+        layout (Layout): the run's layout, for the features cache directories.
+        index (list[dict]): `cell_index.csv` rows, in column order.
+        active (np.ndarray): `(T, C)` inferred cell-frames.
+
+    Returns:
+        np.ndarray: `(C,)` int, the age-zero frame of each column.
+
+    Raises:
+        ValueError: if a cell is inferred before the frame it first appears on,
+            which means the features cache no longer matches this fit.
+    """
+    anchor = cfgmod.get_path(cfg, "outputs.state_age_histogram.anchor", "existence")
+    first_inferred = np.array(
+        [int(np.flatnonzero(active[:, c])[0]) if active[:, c].any() else 0
+         for c in range(active.shape[1])],
+        dtype=np.int64,
+    )
+    if anchor == "inferred":
+        return first_inferred
+
+    births = np.empty(len(index), dtype=np.int64)
+    cached: dict[str, np.ndarray] = {}
+    for column, entry in enumerate(index):
+        crop_id = entry["crop"]
+        if crop_id not in cached:
+            arrays = io.load_npz(layout.crop_dir("features", crop_id) / "features.npz")
+            cached[crop_id] = arrays["active_mask"]
+        present = cached[crop_id][:, int(entry["crop_idx"])]
+        frames = np.flatnonzero(present)
+        births[column] = int(frames[0]) if frames.size else first_inferred[column]
+
+    ahead = np.flatnonzero(births > first_inferred)
+    if ahead.size:
+        column = int(ahead[0])
+        raise ValueError(
+            f"cell {index[column]['crop']}/{index[column]['cell_id']} is inferred at frame "
+            f"{first_inferred[column]} but the features cache first observes it at frame "
+            f"{births[column]}; the cache does not match this fit"
+        )
+    return births
+
+
+def age_histogram(
+    states: np.ndarray,
+    active: np.ndarray,
+    births: np.ndarray,
+    num_states: int,
+    bin_frames: int,
+    max_age: int | None,
+    min_age: int = 0,
+) -> dict:
+    """Bin inferred cell-frames by how long the cell has existed.
+
+    Age is `t - birth`, an elapsed-frame count rather than a rank among the
+    frames the cell was seen in: a cell present at frames 0, 1 and 3 is at ages
+    0, 1 and 3, so a tracking gap costs the cell a sample rather than rewinding
+    its clock.
+
+    Args:
+        states (np.ndarray): `(T, C)` inferred state per cell-frame.
+        active (np.ndarray): `(T, C)` bool, which of those were inferred.
+        births (np.ndarray): `(C,)` age-zero frame per column.
+        num_states (int): `K`.
+        bin_frames (int): width of one age bin, in frames.
+        max_age (int | None): largest age to plot; None takes the largest
+            observed.  Older cell-frames are dropped and counted, never folded
+            into the last bin, which would put a spike there.
+        min_age (int): youngest age to plot, and the origin the bins are laid
+            out from.  Ages below it can only be warmup, where the model is
+            given no state, so plotting them would open the figure with a run
+            of bars that are empty by construction rather than by measurement.
+
+    Returns:
+        dict: `counts` `(B, K)` int, `at_risk` `(B,)` int cells still inferred
+            at that age, `starts` `(B,)` int inclusive bin start, `stops` `(B,)`
+            int inclusive bin end, `dropped` int, `dropped_young` int,
+            `max_observed_age` int.
+
+    Raises:
+        ValueError: on a negative age, i.e. a cell inferred before it was born.
+    """
+    ages = np.arange(active.shape[0], dtype=np.int64)[:, None] - np.asarray(births)[None, :]
+    if (ages[active] < 0).any():
+        raise ValueError("a cell-frame has negative age; births are inconsistent with active_mask")
+
+    flat_ages = ages[active]
+    flat_states = states[active].astype(np.int64)
+    max_observed = int(flat_ages.max()) if flat_ages.size else 0
+    limit = max(max_observed if max_age is None else int(max_age), min_age)
+
+    num_bins = (limit - min_age) // bin_frames + 1
+    young = flat_ages < min_age
+    keep = (~young) & (flat_ages <= limit)
+    dropped = int((flat_ages > limit).sum())
+
+    binned = (flat_ages[keep] - min_age) // bin_frames
+    counts = np.bincount(
+        binned * num_states + flat_states[keep], minlength=num_bins * num_states
+    ).reshape(num_bins, num_states)
+
+    # Cells still contributing at each age, so a bin's shrinking bar can be read
+    # against how many cells were left to fill it.  Counted per cell from its
+    # last inferred age, since that is the age past which it can contribute
+    # nothing whatever the reason -- death, leaving frame, or the end of the movie.
+    last_age = np.full(active.shape[1], -1, dtype=np.int64)
+    has_any = active.any(axis=0)
+    if has_any.any():
+        last_frame = active.shape[0] - 1 - np.argmax(active[::-1], axis=0)
+        last_age[has_any] = (last_frame - np.asarray(births))[has_any]
+    starts = min_age + np.arange(num_bins, dtype=np.int64) * bin_frames
+    at_risk = (last_age[None, :] >= starts[:, None]).sum(axis=1).astype(np.int64)
+
+    return {
+        "counts": counts,
+        "at_risk": at_risk,
+        "starts": starts,
+        "stops": starts + bin_frames - 1,
+        "dropped": dropped,
+        "dropped_young": int(young.sum()),
+        "max_observed_age": max_observed,
+    }
+
+
+def _draw_age_panel(ax, hist: dict, colours, kind: str, normalize: bool) -> None:
+    """Draw one age panel, as counts or as each bin's composition."""
+    counts = hist["counts"].astype(float)
+    totals = counts.sum(axis=1)
+    if normalize:
+        # NaN, not 0, for an empty bin: a bin nothing landed in has no
+        # composition, and drawing it as all-zero would read as one that does.
+        divisor = np.where(totals > 0, totals, 1.0)[:, None]
+        values = np.where(totals[:, None] > 0, counts / divisor, np.nan)
+    else:
+        values = counts
+
+    num_bins, num_states = values.shape
+    centres = hist["starts"] + (hist["stops"] - hist["starts"]) / 2.0
+    width = float(hist["stops"][0] - hist["starts"][0] + 1)
+
+    if kind == "grouped":
+        slot = width / max(num_states, 1)
+        for k in range(num_states):
+            offset = -width / 2.0 + slot * (k + 0.5)
+            ax.bar(centres + offset, np.nan_to_num(values[:, k]), width=slot * 0.9,
+                   color=colours[k], label=f"state {k}")
+    elif kind == "step":
+        edges = np.append(hist["starts"], hist["stops"][-1] + 1)
+        for k in range(num_states):
+            ax.stairs(np.nan_to_num(values[:, k]), edges, color=colours[k],
+                      linewidth=1.4, label=f"state {k}")
+    else:  # stacked
+        bottom = np.zeros(num_bins)
+        for k in range(num_states):
+            column = np.nan_to_num(values[:, k])
+            ax.bar(centres, column, width=width * 0.95, bottom=bottom,
+                   color=colours[k], label=f"state {k}", linewidth=0)
+            bottom += column
+
+    if normalize:
+        ax.set_ylim(0.0, 1.0)
+
+
+def write_state_age_histogram(cfg: dict, fit: dict, layout, out_dir: Path) -> list[Path]:
+    """Inferred state against cell age, pooled over every crop.
+
+    Two panels sharing an x axis.  The top one is the count of inferred
+    cell-frames per state per age bin; the bottom is each bin's composition,
+    with the number of cells still alive at that age drawn over it.  The counts
+    alone cannot separate "the state empties out" from "there are hardly any
+    cells left this old", and that distinction is usually the question being
+    asked of this figure.
+
+    Args:
+        cfg (dict): resolved configuration.
+        fit (dict): loaded fit artifacts.
+        layout (Layout): the run's layout.
+        out_dir (Path): output directory.
+
+    Returns:
+        list[Path]: the written files.
+    """
+    summary = fit["summary"]
+    states = fit["state_assignments"]
+    active = fit["active_mask"]
+    num_states = summary["num_states"]
+    colours = viz.state_colours(num_states)
+
+    settings = cfgmod.get_path(cfg, "outputs.state_age_histogram", {}) or {}
+    bin_frames = int(settings.get("bin_frames", 1))
+    requested_max = settings.get("max_age", "auto")
+    max_age = None if requested_max == "auto" else int(requested_max)
+    kind = settings.get("kind", "stacked")
+    anchor = settings.get("anchor", "existence")
+
+    # A cell's leading `cells.warmup_frames` frames never carry a state, and the
+    # k-th surviving active frame is at least k frames old, so under the
+    # existence anchor no cell-frame can land below that age at all.  Starting
+    # the axis there drops bars that are empty by construction rather than by
+    # measurement -- with the `inferred` anchor there are none, since age zero is
+    # by definition the first frame a state exists for.
+    min_age = int(cfgmod.get_path(cfg, "cells.warmup_frames", 0)) if anchor == "existence" else 0
+
+    births = cell_birth_frames(cfg, layout, fit["index"], active)
+    hist = age_histogram(states, active, births, num_states, bin_frames, max_age, min_age)
+    if hist["dropped"]:
+        print(
+            f"  state_age_histogram: dropped {hist['dropped']} cell-frames older than "
+            f"max_age={max_age} (largest observed age {hist['max_observed_age']})"
+        )
+    if hist["dropped_young"]:
+        # Unreachable as the pipeline stands; if it ever fires, the warmup no
+        # longer means what this figure assumes and the bars are undercounts.
+        print(
+            f"  WARNING state_age_histogram: {hist['dropped_young']} inferred cell-frames "
+            f"fall below age {min_age} and are not plotted"
+        )
+
+    csv_path = out_dir / "state_age_histogram.csv"
+    with io.atomic_write(csv_path, "w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(
+            ["age_bin_start", "age_bin_end", "n_cells_at_risk", "total"]
+            + [f"count_{label}" for label in _state_labels(num_states)]
+        )
+        for b in range(hist["counts"].shape[0]):
+            row = hist["counts"][b]
+            writer.writerow(
+                [int(hist["starts"][b]), int(hist["stops"][b]), int(hist["at_risk"][b]),
+                 int(row.sum())] + [int(v) for v in row]
+            )
+
+    viz.apply_style()
+    # Constrained rather than tight: a suptitle plus a figure-level legend plus
+    # a twin axis is exactly the combination tight_layout mis-measures.
+    figure, axes = plt.subplots(2, 1, figsize=(9, 6), sharex=True,
+                               height_ratios=[2, 1.4], layout="constrained")
+    _draw_age_panel(axes[0], hist, colours, kind, normalize=False)
+    axes[0].set_ylabel("cell-frames")
+    axes[0].set_title("inferred cell-frames per state, by cell age")
+
+    _draw_age_panel(axes[1], hist, colours, kind, normalize=True)
+    axes[1].set_ylabel("fraction of the bin")
+    axes[1].set_title("composition of each age bin")
+    origin = "first appearance" if anchor == "existence" else "first inferred frame"
+    axes[1].set_xlabel(f"cell age (frames since {origin})")
+    # The composition of a bin filled by three cells is not comparable with one
+    # filled by three hundred, so the count of surviving cells is drawn on top
+    # of the panel whose y axis has had that information normalized away.
+    risk_ax = axes[1].twinx()
+    edges = np.append(hist["starts"], hist["stops"][-1] + 1)
+    # baseline=None: with a baseline, `stairs` closes the outline down to zero at
+    # both ends, and those two vertical drops read as the cell count collapsing.
+    risk_ax.stairs(hist["at_risk"], edges, baseline=None, color="0.35",
+                   linewidth=1.2, linestyle="--", label="cells at risk")
+    risk_ax.set_ylabel("cells at risk", color="0.35")
+    risk_ax.tick_params(axis="y", colors="0.35")
+    risk_ax.set_ylim(bottom=0)
+    risk_ax.spines["right"].set_visible(True)
+    risk_ax.spines["right"].set_color("0.35")
+
+    note = f"bin = {bin_frames} frame{'s' if bin_frames != 1 else ''}, anchor = {anchor}"
+    if min_age:
+        # Otherwise an axis that starts at 1 rather than 0 reads as a bug rather
+        # than as the warmup the model was never given a state for.
+        note += f", ages below {min_age} omitted (warmup)"
+    if hist["dropped"]:
+        note += f", {hist['dropped']} cell-frames beyond age {max_age} dropped"
+    figure.suptitle(f"{summary['run_name']}: state occupancy over cell age\n{note}", fontsize=10)
+    # Outside the axes, at figure level: an in-axes legend covers the bars at
+    # whichever ages happen to be tallest, and a per-axes outside legend would
+    # narrow the top panel out of alignment with the bottom one.  Below rather
+    # than above, because constrained layout puts an outside upper legend and
+    # the suptitle in the same place.
+    handles, labels = axes[0].get_legend_handles_labels()
+    figure.legend(handles, labels, loc="outside lower center",
+                  ncol=min(num_states, 8), frameon=False)
+    png_path = out_dir / "state_age_histogram.png"
+    figure.savefig(png_path, dpi=160, bbox_inches="tight", facecolor="white")
+    plt.close(figure)
+    return [csv_path, png_path]
+
+
+# --------------------------------------------------------------------------- #
+# 5. overlay videos
 # --------------------------------------------------------------------------- #
 
 
@@ -374,6 +675,7 @@ def _run(cfg: dict, layout, args) -> dict:
     written += write_state_assignments(fit, out_dir)
     written += write_transition_matrix(fit, out_dir)
     written += write_feature_distributions(cfg, fit, out_dir)
+    written += write_state_age_histogram(cfg, fit, layout, out_dir)
     written += write_overlay_videos(cfg, fit, io.ensure_dir(layout.overlays_dir))
 
     for path in written:
@@ -382,4 +684,4 @@ def _run(cfg: dict, layout, args) -> dict:
 
 
 if __name__ == "__main__":
-    sys.exit(step_main("outputs", "the four base outputs", _run))
+    sys.exit(step_main("outputs", "the five base outputs", _run))

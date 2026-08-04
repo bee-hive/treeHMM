@@ -28,7 +28,7 @@ See `README.md` for the full probabilistic model and `Derivation/` for the forwa
 | `dino` | dino | `cs229Dino` | DINOv2 embeddings of centroid patches (**cached**) |
 | `pca` | dino | `cs229Dino` | joint PCA → top-k components (**cached**) |
 | `fit` | model | `treeHMM_env` | fitted AR-HMM + posteriors (run-local) |
-| `outputs` | imaging | `OccidentAnalysis` | the four base outputs (run-local) |
+| `outputs` | imaging | `OccidentAnalysis` | the five base outputs (run-local) |
 | `extras` | imaging | `OccidentAnalysis` | opt-in extras (run-local, optional) |
 
 `dino`/`pca` are dropped from the chain entirely unless `model.use_dino_pcs: true`; `extras` is
@@ -92,6 +92,7 @@ outputs/
   overlays/<crop>_state_overlay.mp4         cancer cells tinted by state
   feature_distributions.png                 every cached feature, per state
   state_feature_summary.csv
+  state_age_histogram.png / .csv            state occupancy binned by cell age
   transition_matrix.csv / .png
   initial_distribution.csv
   state_assignments.csv                     one row per inferred cell-frame

@@ -58,6 +58,9 @@ INIT_METHODS = ("kmeans", "prior", "random")
 #: What is drawn over the phase patch handed to DINOv2.  At most one of them:
 #: `rfp` can use the red channel only because `masks` is not.
 PATCH_OVERLAYS = ("rfp", "masks", "none")
+#: Bar styles for the cell-age histogram, and what its age zero means.
+AGE_HISTOGRAM_KINDS = ("stacked", "grouped", "step")
+AGE_ANCHORS = ("existence", "inferred")
 
 
 class ConfigError(Exception):
@@ -610,6 +613,32 @@ def validate(cfg: dict) -> None:
         unknown = [c for c in requested_video if c not in known_crops]
         if unknown:
             raise ConfigError(f"outputs.video.crops names crops not in data.crop_ids: {unknown}")
+
+    histogram = get_path(cfg, "outputs.state_age_histogram", {}) or {}
+    if not isinstance(histogram, dict):
+        raise ConfigError("outputs.state_age_histogram must be a mapping")
+    bin_frames = histogram.get("bin_frames", 1)
+    if not isinstance(bin_frames, int) or isinstance(bin_frames, bool) or bin_frames < 1:
+        raise ConfigError(
+            f"outputs.state_age_histogram.bin_frames must be an integer >= 1, got {bin_frames!r}"
+        )
+    max_age = histogram.get("max_age", "auto")
+    if max_age != "auto":
+        if not isinstance(max_age, int) or isinstance(max_age, bool) or max_age < 1:
+            raise ConfigError(
+                f"outputs.state_age_histogram.max_age must be 'auto' or an integer >= 1, "
+                f"got {max_age!r}"
+            )
+    kind = histogram.get("kind", "stacked")
+    if kind not in AGE_HISTOGRAM_KINDS:
+        raise ConfigError(
+            f"outputs.state_age_histogram.kind must be one of {AGE_HISTOGRAM_KINDS}, got {kind!r}"
+        )
+    anchor = histogram.get("anchor", "existence")
+    if anchor not in AGE_ANCHORS:
+        raise ConfigError(
+            f"outputs.state_age_histogram.anchor must be one of {AGE_ANCHORS}, got {anchor!r}"
+        )
 
     extras = get_path(cfg, "outputs.extras", []) or []
     if not isinstance(extras, list):

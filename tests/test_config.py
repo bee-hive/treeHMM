@@ -141,6 +141,14 @@ class Validation(unittest.TestCase):
             ("no model inputs",
              lambda c: c["model"].update(features=[], use_dino_pcs=False), "no inputs"),
             ("unknown extra", lambda c: c["outputs"].update(extras=["nope"]), "unknown extra"),
+            ("zero-width age bins",
+             lambda c: c["outputs"]["state_age_histogram"].update(bin_frames=0), "bin_frames"),
+            ("a max_age that is neither auto nor a count",
+             lambda c: c["outputs"]["state_age_histogram"].update(max_age="lots"), "max_age"),
+            ("unknown age histogram style",
+             lambda c: c["outputs"]["state_age_histogram"].update(kind="violin"), "kind"),
+            ("unknown age anchor",
+             lambda c: c["outputs"]["state_age_histogram"].update(anchor="division"), "anchor"),
         ]
         for label, mutate, message in cases:
             with self.subTest(label):
@@ -301,6 +309,8 @@ class CacheKeys(unittest.TestCase):
              lambda c: c["dino"].update(patch_px=80), []),
             ("video settings touch only outputs",
              lambda c: c["outputs"]["video"].update(fps=5), ["outputs"]),
+            ("cell-age binning touches only outputs",
+             lambda c: c["outputs"]["state_age_histogram"].update(bin_frames=5), ["outputs"]),
             ("num_states touches fit downward",
              lambda c: c["model"].update(num_states=4), ["fit", "outputs"]),
             ("seeds touch fit downward",

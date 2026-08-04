@@ -2,7 +2,7 @@
 
 Deterministic, config-driven runs of the tree AR-HMM.
 
-**One YAML file defines one run.** Every run produces the same four base outputs,
+**One YAML file defines one run.** Every run produces the same five base outputs,
 plus whatever extras it asks for. Feature computation is decoupled from model
 fitting, so adding a new input is a small, local change.
 
@@ -32,7 +32,7 @@ because no single environment has JAX, torch and scikit-image together.
 | `dino` | `cs229Dino` | DINOv2 embeddings of centroid patches | cached |
 | `pca` | `cs229Dino` | one joint PCA → top-k components | cached |
 | `fit` | `treeHMM_env` | the fitted model and posteriors | run-local |
-| `outputs` | `OccidentAnalysis` | the four base outputs | run-local |
+| `outputs` | `OccidentAnalysis` | the five base outputs | run-local |
 | `extras` | `OccidentAnalysis` | opt-in extra outputs | run-local, optional |
 
 `dino` and `pca` are skipped unless `model.use_dino_pcs` is true; `extras` is
@@ -219,6 +219,7 @@ analysis/runs/<run_name>/
     overlays/<crop>_state_overlay.mp4        cancer cells tinted by state
     feature_distributions.png                every cached feature, per state
     state_feature_summary.csv
+    state_age_histogram.png / .csv           state occupancy binned by cell age
     transition_matrix.csv / .png
     initial_distribution.csv
     state_assignments.csv                    one row per inferred cell-frame
@@ -232,6 +233,21 @@ diagnostic**, and the distribution figure covers all of it, marking which
 features the model was actually fit on. A state characterised only by its own
 inputs is a tautology; the held-out features are what make the description
 checkable.
+
+`state_age_histogram` bins every inferred cell-frame by **cell age** -- elapsed
+frames since the cell first appeared, pooled over all crops. Age is
+`t - birth`, not a rank among the frames the cell was seen in, so a cell tracked
+at frames 0, 1 and 3 sits at ages 0, 1 and 3: a tracking gap costs it a sample
+rather than rewinding its clock. Under the default
+`outputs.state_age_histogram.anchor: existence`, age 0 is the cell's first
+observed frame, which is read from the **features** cache rather than from
+`fit/active_mask.npy` -- the latter has had `cells.warmup_frames` removed. The
+axis therefore starts at `cells.warmup_frames`, not at 0: no cell-frame can
+carry a state below that age, so those bars would be empty by construction
+rather than by measurement. The second panel gives each bin's
+composition with the number of cells still alive drawn over it, because a bar
+falling off with age means either that the state empties or that hardly any
+cells are left that old, and the counts alone cannot tell those apart.
 
 ---
 

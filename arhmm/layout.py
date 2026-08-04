@@ -9,7 +9,7 @@ same inputs) or *run-local*.
     dino      dino      DINOv2 embeddings of centroid patches     [cached]
     pca       dino      joint PCA -> top-k principal components   [cached]
     fit       model     fit the AR-HMM                            [run-local]
-    outputs   imaging   the four base outputs                     [run-local]
+    outputs   imaging   the five base outputs                     [run-local]
     extras    imaging   any additional outputs the run asked for  [run-local]
 
 Cache keys chain: a step's key hashes its own config subset together with the
@@ -152,9 +152,13 @@ STEPS: tuple[Step, ...] = (
         name="outputs",
         env="imaging",
         upstream=("fit",),
-        depends=("outputs.video", "outputs.feature_distributions"),
+        depends=("outputs.video", "outputs.feature_distributions",
+                 "outputs.state_age_histogram"),
         shared=False,
-        summary="overlay videos, feature distributions, transitions, assignments",
+        # v2: the cell-age histogram starts at cells.warmup_frames rather than
+        # at age 0, which no config key expresses.
+        version=2,
+        summary="overlay videos, feature and cell-age distributions, transitions, assignments",
     ),
     Step(
         name="extras",
@@ -448,5 +452,5 @@ def declared_outputs(name: str, cfg: dict) -> Iterable[str]:
     if name == "fit":
         return ["fit_summary.yml", "state_assignments.npy"]
     if name == "outputs":
-        return ["state_assignments.csv", "transition_matrix.csv"]
+        return ["state_assignments.csv", "transition_matrix.csv", "state_age_histogram.csv"]
     return []

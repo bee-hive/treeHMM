@@ -147,5 +147,24 @@ outputs:
     # currently unused: the figure always plots every cached feature
     include: all                         # inert; kept so the outputs key is stable
 
+  # inferred cell-frames per state, binned by how long the cell has existed,
+  # pooled over every crop
+  state_age_histogram:
+    # width of one age bin, in frames
+    bin_frames: 1                        # int >= 1
+
+    # largest age plotted; older cell-frames are dropped and reported, never
+    # folded into the last bin
+    max_age: auto                        # 'auto' | int >= 1
+
+    # bar style; `stacked` shows the total, `grouped` compares states directly
+    kind: stacked                        # [stacked, grouped, step]
+
+    # what age 0 means.  `existence` is the cell's first observed frame; the
+    # plot then starts at cells.warmup_frames, since the model is given no state
+    # below that age.  `inferred` starts the clock at the first frame a state
+    # exists for, so every cell contributes to age 0 by construction.
+    anchor: existence                    # [existence, inferred]
+
   # opt-in extra outputs, discovered by filename under arhmm/extras/
   extras: []                             # [condition_stats, dino_confounds, state_timeline]

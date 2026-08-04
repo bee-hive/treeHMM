@@ -1,6 +1,6 @@
 """Optional, run-specific outputs.
 
-Every run produces the four base outputs.  Anything beyond that is an extra:
+Every run produces the five base outputs.  Anything beyond that is an extra:
 named in `outputs.extras`, produced into `{run}/outputs/extras/{name}/`, and
 free to fail without taking the run's real outputs down with it.
 
