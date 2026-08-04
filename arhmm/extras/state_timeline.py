@@ -62,7 +62,7 @@ def run(cfg: dict, layout, out_dir: Path) -> None:
     import matplotlib.patches as mpatches
     import matplotlib.pyplot as plt
 
-    from treearhmm.core import io, viz
+    from arhmm.core import io, viz
 
     fit_dir = layout.fit_dir
     states = np.load(fit_dir / "state_assignments.npy")

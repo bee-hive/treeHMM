@@ -20,7 +20,7 @@ rather than a comment a later edit can quietly violate.  A cell's first active
 frame has no predecessor, which is why every run holds
 `cells.warmup_frames >= 1`.
 
-**Import weight matters.** This module is imported by `treearhmm.config`, which
+**Import weight matters.** This module is imported by `arhmm.config`, which
 every step imports, and the steps run in three different conda environments --
 only one of which has scikit-image.  So `numpy` is imported at module level and
 **scikit-image is imported lazily inside the functions that need it**.  Keep it

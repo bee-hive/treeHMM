@@ -1,11 +1,7 @@
 # Input to the Tree AR-HMM
 
-Reference for exactly what `models/tarhmm.py` consumes, and how the `treearhmm/`
+Reference for exactly what `models/tarhmm.py` consumes, and how the `arhmm/`
 pipeline builds it.
-
-> **Note:** `treearhmm/` currently has no `.py` source on disk or in git — only
-> `__pycache__/*.cpython-311.pyc`. Everything below about the pipeline was
-> recovered from that bytecode (docstrings and constants survived intact).
 
 ---
 
@@ -58,7 +54,7 @@ Passed to the constructor: `tARHMM(num_states, emission_dim, num_lags, ...)`.
 
 ## 3. What `D` contains
 
-From `treearhmm/steps/fit.py::_load_inputs` and `treearhmm/config.py::emission_names`,
+From `arhmm/steps/fit.py::_load_inputs` and `arhmm/config.py::emission_names`,
 the emission vector is a concatenation **in this order**:
 
 1. **Track features** — `model.features`, a subset of `features.compute`,
@@ -73,7 +69,7 @@ D = len(model.features) + (dino.n_pcs if model.use_dino_pcs else 0)
 
 Config validation rejects `D == 0`.
 
-### Track-feature registry (`treearhmm/lib/trackfeatures.py`)
+### Track-feature registry (`arhmm/core/trackfeatures.py`)
 
 **Per-frame** — computed from a single frame's masks and image:
 
@@ -113,7 +109,7 @@ validation forces `cells.warmup_frames >= 1`.
 
 ## 4. Mask semantics
 
-Defined in `treearhmm/lib/lineage.py::build_masks`, consumed throughout
+Defined in `arhmm/core/lineage.py::build_masks`, consumed throughout
 `models/tarhmm.py`.
 
 - **`parent_indices[t, c]`** — the cell **itself** while it persists, the
@@ -163,7 +159,7 @@ inactive for inference) still supplies a valid AR input.
 
 ## 6. Pipeline preprocessing before the model sees the arrays
 
-`treearhmm/steps/fit.py`, in order:
+`arhmm/steps/fit.py`, in order:
 
 1. **`lineage.filter_short_cells(min_frames)`** — drops columns with fewer than
    `cells.min_frames` active frames and **remaps `parent_indices`**, promoting

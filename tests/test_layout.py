@@ -16,8 +16,8 @@ import unittest
 from pathlib import Path
 
 import conftest  # noqa: F401
-from treearhmm import config as C
-from treearhmm import layout as L
+from arhmm import config as C
+from arhmm import layout as L
 
 SMOKE = "configs/_smoke.yml"
 

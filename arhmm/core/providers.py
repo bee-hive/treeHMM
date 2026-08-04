@@ -31,8 +31,8 @@ from typing import Callable
 
 import numpy as np
 
-from treearhmm import config as cfgmod
-from treearhmm.core import io
+from arhmm import config as cfgmod
+from arhmm.core import io
 
 
 @dataclass(frozen=True)
@@ -77,7 +77,7 @@ def _tracks_load(cfg: dict, layout, crop_id: str) -> tuple[np.ndarray, list[str]
 
 
 def _tracks_describe(column: str, cfg: dict) -> str:
-    from treearhmm.core.trackfeatures import FEATURE_REGISTRY
+    from arhmm.core.trackfeatures import FEATURE_REGISTRY
 
     feature = FEATURE_REGISTRY[column]
     unit = f" [{feature.units}]" if feature.units else ""

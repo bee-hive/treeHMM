@@ -10,7 +10,7 @@ This project spans **three conda environments**. Use the right one for each task
 
 > There is **no env named `occident`** — earlier revisions of this file and of the
 > archived scripts said so and were wrong. `AnalysisEnv` also exists but is Python 3.14
-> and unrelated to this project. `python -m treearhmm doctor` checks that all three names in
+> and unrelated to this project. `python -m arhmm doctor` checks that all three names in
 > `configs/site.yml` resolve.
 
 > **Cross-environment hazard.** The three envs are on numpy 1.26.4 / 2.4.2 / 2.4.6 and
@@ -60,7 +60,7 @@ conda run --no-capture-output -n treeHMM_env pip install \
   matplotlib seaborn pandas tifffile pyyaml fastprogress
 ```
 
-`dynamax` brings in jax, jaxlib, optax, scikit-learn, jaxtyping, and numpy. The remaining packages are what `treearhmm/steps/fit.py` needs for data loading and its summary output.
+`dynamax` brings in jax, jaxlib, optax, scikit-learn, jaxtyping, and numpy. The remaining packages are what `arhmm/steps/fit.py` needs for data loading and its summary output.
 
 ### 3. ⚠️ Critical: replace TensorFlow Probability with `tfp-nightly`
 
@@ -126,8 +126,8 @@ The pipeline switches environments per step automatically. The package is not
 pip-installed, so run the CLI as a module from the repo root, in conda `base`:
 
 ```bash
-python -m treearhmm doctor                      # check all three envs, paths, CUDA
-python -m treearhmm run configs/_smoke.yml      # one crop, no DINO, ~1 minute
+python -m arhmm doctor                      # check all three envs, paths, CUDA
+python -m arhmm run configs/_smoke.yml      # one crop, no DINO, ~1 minute
 ```
 
 To run one step by hand in its own environment (it is stamp-guarded like the
@@ -135,7 +135,7 @@ driver, so pass `--force` to redo a step that is already current):
 
 ```bash
 PYTHONPATH=$PWD conda run --no-capture-output -n treeHMM_env \
-  python -m treearhmm.steps.fit --run-dir analysis/runs/_smoke --force
+  python -m arhmm.steps.fit --run-dir analysis/runs/_smoke --force
 ```
 
 Before the first run, set the absolute paths in `configs/site.yml` (`repo_root`,
@@ -149,7 +149,7 @@ Before the first run, set the absolute paths in `configs/site.yml` (`repo_root`,
 - To pick a specific GPU (e.g. if GPU 0 is busy), set `CUDA_VISIBLE_DEVICES`:
   ```bash
   CUDA_VISIBLE_DEVICES=1 PYTHONPATH=$PWD conda run --no-capture-output -n treeHMM_env \
-    python -m treearhmm.steps.fit --run-dir analysis/runs/_smoke --force
+    python -m arhmm.steps.fit --run-dir analysis/runs/_smoke --force
   ```
   For a normal run, set `hardware.cuda_visible_devices` in `configs/site.yml`
   instead — the CLI applies it to every step it spawns.

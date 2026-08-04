@@ -22,8 +22,8 @@ Validation is split in two on purpose:
 
     validate(cfg)         pure; touches no filesystem, so a config can be checked
                           anywhere and the rules are unit-testable
-    validate_inputs(cfg)  the filesystem and conda checks, run by `treearhmm run`
-                          and `treearhmm doctor`
+    validate_inputs(cfg)  the filesystem and conda checks, run by `arhmm run`
+                          and `arhmm doctor`
 
 **Import weight matters here.**  This module is imported by every step, and the
 steps run in three different conda environments.  It may import only `yaml`,
@@ -40,7 +40,7 @@ from typing import Any, Iterable
 
 import yaml
 
-from treearhmm.core import trackfeatures
+from arhmm.core import trackfeatures
 
 CONFIG_DIR_NAME = "configs"
 DEFAULT_CONFIG_NAME = "default.yml"
@@ -601,7 +601,7 @@ def validate(cfg: dict) -> None:
         raise ConfigError("outputs.extras must be a list")
     # Imported lazily: `extras/__init__.py` only needs to be importable in the
     # environment that actually runs the extras step.
-    from treearhmm.extras import EXTRA_NAMES, requirements_for
+    from arhmm.extras import EXTRA_NAMES, requirements_for
 
     for name in extras:
         if name not in EXTRA_NAMES:
@@ -687,7 +687,7 @@ def _writability_problem(root: Path) -> str | None:
     except OSError as exc:
         return f"could not be created ({exc.strerror})"
     try:
-        with tempfile.NamedTemporaryFile(dir=str(root), prefix=".treearhmm-probe-"):
+        with tempfile.NamedTemporaryFile(dir=str(root), prefix=".arhmm-probe-"):
             pass
     except OSError as exc:
         return f"is not writable ({exc.strerror})"

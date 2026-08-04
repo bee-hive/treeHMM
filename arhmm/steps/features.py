@@ -33,11 +33,11 @@ import sys
 
 import numpy as np
 
-from treearhmm import config as cfgmod
-from treearhmm.core import cells as cellsmod
-from treearhmm.core import io, lineage
-from treearhmm.core import trackfeatures as tf
-from treearhmm.steps import step_main
+from arhmm import config as cfgmod
+from arhmm.core import cells as cellsmod
+from arhmm.core import io, lineage
+from arhmm.core import trackfeatures as tf
+from arhmm.steps import step_main
 
 
 def _run(cfg: dict, layout, args) -> dict:

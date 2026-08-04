@@ -27,10 +27,10 @@ import sys
 
 import numpy as np
 
-from treearhmm import config as cfgmod
-from treearhmm.core import cells as cellsmod
-from treearhmm.core import io
-from treearhmm.steps import step_main
+from arhmm import config as cfgmod
+from arhmm.core import cells as cellsmod
+from arhmm.core import io
+from arhmm.steps import step_main
 
 CONTACT_SHEET_PATCHES = 16
 
@@ -58,7 +58,7 @@ def _contact_sheet(patches, labels, path, columns=4):
 def _run(cfg: dict, layout, args) -> dict:
     import transformers
 
-    from treearhmm.core import dino as dinomod
+    from arhmm.core import dino as dinomod
 
     params = cfgmod.get_path(cfg, "dino")
     processor, model, device, embed_dim = dinomod.load_model(

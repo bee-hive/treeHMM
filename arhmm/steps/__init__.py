@@ -2,7 +2,7 @@
 
 Each step module is independently runnable inside its own conda environment:
 
-    python -m treearhmm.steps.<name> --run-dir <run directory>
+    python -m arhmm.steps.<name> --run-dir <run directory>
 
 It reads `config.resolved.yml` from that directory and **nothing else** -- never
 a parameter passed on the command line.  That is what makes "rerun this step by
@@ -11,7 +11,7 @@ when the only way to debug the model step is to run it alone in `treeHMM_env`.
 
 `step_main` handles the shared scaffolding: argument parsing, loading the
 resolved config, building the `Layout`, timing, and writing the completion stamp
-that `treearhmm status` reads.
+that `arhmm status` reads.
 """
 
 from __future__ import annotations
@@ -20,9 +20,9 @@ import argparse
 import time
 from typing import Callable
 
-from treearhmm import config as cfgmod
-from treearhmm import layout as layoutmod
-from treearhmm.core import io
+from arhmm import config as cfgmod
+from arhmm import layout as layoutmod
+from arhmm.core import io
 
 
 def parse_step_args(name: str, description: str, argv: list[str] | None = None):
@@ -36,7 +36,7 @@ def parse_step_args(name: str, description: str, argv: list[str] | None = None):
     Returns:
         argparse.Namespace: with `run_dir` and `force`.
     """
-    parser = argparse.ArgumentParser(prog=f"treearhmm.steps.{name}", description=description)
+    parser = argparse.ArgumentParser(prog=f"arhmm.steps.{name}", description=description)
     parser.add_argument("--run-dir", required=True, help="run directory holding config.resolved.yml")
     parser.add_argument(
         "--force", action="store_true", help="recompute even if the output is already current"

@@ -30,10 +30,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-from treearhmm import config as cfgmod  # noqa: E402
-from treearhmm.core import cells as cellsmod  # noqa: E402
-from treearhmm.core import io, viz  # noqa: E402
-from treearhmm.steps import step_main  # noqa: E402
+from arhmm import config as cfgmod  # noqa: E402
+from arhmm.core import cells as cellsmod  # noqa: E402
+from arhmm.core import io, viz  # noqa: E402
+from arhmm.steps import step_main  # noqa: E402
 
 
 def _load_fit(layout) -> dict:
@@ -196,7 +196,7 @@ def write_feature_distributions(cfg: dict, fit: dict, out_dir: Path) -> list[Pat
     max_cols = int(cfgmod.get_path(cfg, "outputs.feature_distributions.max_cols", 4))
     colours = viz.state_colours(num_states)
 
-    from treearhmm.core.trackfeatures import FEATURE_REGISTRY
+    from arhmm.core.trackfeatures import FEATURE_REGISTRY
 
     units = {
         name: FEATURE_REGISTRY[name].units for name in names if name in FEATURE_REGISTRY

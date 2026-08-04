@@ -1,6 +1,6 @@
 # The `model` environment: JAX / Dynamax / the tARHMM itself.
 #
-# Runs exactly one step, `treearhmm.steps.fit`, plus `models/tarhmm.py`.
+# Runs exactly one step, `arhmm.steps.fit`, plus `models/tarhmm.py`.
 # Everything scientific comes from pip -- conda supplies only the interpreter.
 #
 # AFTER creating this environment you MUST run:

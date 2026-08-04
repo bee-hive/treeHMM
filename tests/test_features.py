@@ -14,8 +14,8 @@ import unittest
 import numpy as np
 
 import conftest  # noqa: F401
-from treearhmm.core import lineage as LG
-from treearhmm.core import trackfeatures as tf
+from arhmm.core import lineage as LG
+from arhmm.core import trackfeatures as tf
 
 
 def series(active_rows, values_rows=None, centroid_rows=None, params=None):

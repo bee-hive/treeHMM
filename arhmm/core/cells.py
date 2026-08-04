@@ -45,7 +45,7 @@ from pathlib import Path
 
 import numpy as np
 
-from treearhmm.core.io import well_of
+from arhmm.core.io import well_of
 
 #: Percentile pair used when no config value is supplied.
 DEFAULT_NORM_PERCENTILES = (1.0, 99.0)
@@ -92,7 +92,7 @@ class CropCells:
 
 def ground_truth_dir(cfg: dict, crop_id: str) -> Path:
     """Directory holding a crop's ground-truth tracks."""
-    from treearhmm.config import get_path
+    from arhmm.config import get_path
 
     root = Path(get_path(cfg, "paths.ground_truth_tracks_dir"))
     return root / well_of(crop_id) / crop_id
@@ -100,7 +100,7 @@ def ground_truth_dir(cfg: dict, crop_id: str) -> Path:
 
 def image_path(cfg: dict, crop_id: str) -> Path:
     """The crop's aligned phase/RFP image."""
-    from treearhmm.config import get_path
+    from arhmm.config import get_path
 
     root = Path(get_path(cfg, "paths.image_crops_dir"))
     return root / well_of(crop_id) / crop_id / "crop.tiff"
@@ -165,13 +165,13 @@ def load_crop(cfg: dict, crop_id: str, *, with_image: bool = True) -> CropCells:
         ValueError: if the tracks and image disagree on frame count, or if the
             cancer ID list names IDs absent from the track stack.
     """
-    from treearhmm.config import get_path
+    from arhmm.config import get_path
 
     source = get_path(cfg, "cells.source")
     if source == "nuclei":
         raise NotImplementedError(
             "cells.source: nuclei is a declared seam, not an implementation. "
-            "Add a loader here in treearhmm/core/cells.py that reads "
+            "Add a loader here in arhmm/core/cells.py that reads "
             "paths.caliban_tracks_dir and maps the cancer ID space onto nucleus "
             "labels by maximum pixel overlap."
         )

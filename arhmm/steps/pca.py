@@ -36,9 +36,9 @@ import sys
 
 import numpy as np
 
-from treearhmm import config as cfgmod
-from treearhmm.core import io
-from treearhmm.steps import step_main
+from arhmm import config as cfgmod
+from arhmm.core import io
+from arhmm.steps import step_main
 
 
 def _run(cfg: dict, layout, args) -> dict:

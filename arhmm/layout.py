@@ -29,8 +29,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from treearhmm import config as cfgmod
-from treearhmm.core import io
+from arhmm import config as cfgmod
+from arhmm.core import io
 
 
 @dataclass(frozen=True)
@@ -38,7 +38,7 @@ class Step:
     """One stage of the pipeline.
 
     Attributes:
-        name (str): step name; also the module under `treearhmm.steps`.
+        name (str): step name; also the module under `arhmm.steps`.
         env (str): key into the config's `envs` mapping.
         upstream (tuple[str, ...]): steps whose keys feed this one's key.
         depends (tuple[str, ...]): dotted config paths this step's output
@@ -49,7 +49,7 @@ class Step:
         optional (bool): the run continues if this step fails.
         version (int): bump by hand when the step's numerical output changes for
             reasons the config does not capture.
-        summary (str): one line, shown by `treearhmm status`.
+        summary (str): one line, shown by `arhmm status`.
     """
 
     name: str
@@ -63,7 +63,7 @@ class Step:
 
     @property
     def module(self) -> str:
-        return f"treearhmm.steps.{self.name}"
+        return f"arhmm.steps.{self.name}"
 
 
 #: Config keys derived rather than read verbatim.  `step_key` resolves these

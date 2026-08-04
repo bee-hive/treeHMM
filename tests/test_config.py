@@ -19,8 +19,8 @@ from pathlib import Path
 import yaml
 
 import conftest  # noqa: F401  (puts the repo root on sys.path)
-from treearhmm import config as C
-from treearhmm import layout as L
+from arhmm import config as C
+from arhmm import layout as L
 
 SMOKE = "configs/_smoke.yml"
 

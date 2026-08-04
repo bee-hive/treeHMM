@@ -18,7 +18,7 @@ import unittest
 import numpy as np
 
 import conftest  # noqa: F401
-from treearhmm.core import dino as D
+from arhmm.core import dino as D
 
 PARAMS = dict(
     mask_alpha=0.45,

@@ -5,7 +5,7 @@ conda environments, the crop list) and `configs/default.yml` (the
 experiment-facing defaults), resolved once, and frozen into the run directory so
 the run stays reproducible even if the defaults change afterwards.
 
-    treearhmm run configs/_smoke.yml
+    arhmm run configs/_smoke.yml
 
 Every run produces the same four base outputs -- state-coloured overlay videos,
 per-state feature distributions, the learned transition matrix, and per-cell
@@ -18,8 +18,8 @@ out of scope, so `is_division_mask` is all False, `parent_indices` is always
 self, and the division kernel is never exercised.
 
 To add a track feature, add one decorated function to
-`treearhmm/core/trackfeatures.py`.  To add a whole modality, add a provider to
-`treearhmm/core/providers.py` and a step to produce it.
+`arhmm/core/trackfeatures.py`.  To add a whole modality, add a provider to
+`arhmm/core/providers.py` and a step to produce it.
 """
 
 __all__ = ["__version__"]

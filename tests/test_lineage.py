@@ -13,7 +13,7 @@ import unittest
 import numpy as np
 
 import conftest  # noqa: F401
-from treearhmm.core import lineage as LG
+from arhmm.core import lineage as LG
 
 
 def presence(rows: list[str]) -> np.ndarray:

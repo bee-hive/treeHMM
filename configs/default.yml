@@ -105,4 +105,4 @@ outputs:
     kind: violin             # violin | box
     max_cols: 4
     include: all             # every cached feature, not just what the model saw
-  extras: []                 # module names under treearhmm/extras/
+  extras: []                 # module names under arhmm/extras/

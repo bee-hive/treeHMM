@@ -14,7 +14,7 @@ See `README.md` for the full probabilistic model and `Derivation/` for the forwa
     - includes tracks for both cancer and T cells, cancer cells identified by `/gladstone/engelhardt/lab/MarsonLabIncucyteData/groundTruthTracks/TCR-T/<well_id>/<well_id>_<slice_id>/ALL_cancer_ids.pkl`
 - Cancer Nuclei Tracks: `/gladstone/engelhardt/lab/MarsonLabIncucyteData/groundTruthCalibanTracks/<well_id>_<slice_id>.tiff`
     - shape (T, Y, X)
-- Raw Phase image: `/gladstone/engelhardt/lab/MarsonLabIncucyteData/TrackingCrops/CarnevaleRepStim/<well_id>/<well_id>_<slice_id>/B4_t50t100y200y350x750x900/crop.tiff`
+- Raw Phase image: `/gladstone/engelhardt/lab/MarsonLabIncucyteData/TrackingCrops/CarnevaleRepStim/<well_id>/<well_id>_<slice_id>/B4_<slice_id>/crop.tiff`
     - shape (T, Y, X, 2)
         - in last channel, 0 is RFP intensity, 1 is phase image
 
@@ -37,7 +37,7 @@ dropped when `outputs.extras` is empty.
 Cached steps are content-addressed under `analysis/cache/<step>/<key>/` and shared across
 runs, so a sweep over `model.*` recomputes only `fit` onward.
 
-`treearhmm/README.md` is the detailed reference (determinism rules, cache keys,
+`arhmm/README.md` is the detailed reference (determinism rules, cache keys,
 provider abstraction); `env_setup.md` covers building `treeHMM_env`.
 
 ## Run Existing Experiment
@@ -50,12 +50,12 @@ right env itself.
 ```bash
 cd /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/treeHMM
 
-python -m treearhmm doctor configs/runs/dino_k3.yml     # envs, paths, CUDA, npz round-trip
-python -m treearhmm list   configs/_smoke.yml           # run directories under output_root
-python -m treearhmm show   configs/runs/dino_k3.yml     # fully resolved config
-python -m treearhmm status configs/runs/dino_k3.yml     # which steps are current, and why
-python -m treearhmm run --dry-run configs/runs/dino_k3.yml
-python -m treearhmm run    configs/runs/dino_k3.yml
+python -m arhmm doctor configs/runs/dino_k3.yml     # envs, paths, CUDA, npz round-trip
+python -m arhmm list   configs/_smoke.yml           # run directories under output_root
+python -m arhmm show   configs/runs/dino_k3.yml     # fully resolved config
+python -m arhmm status configs/runs/dino_k3.yml     # which steps are current, and why
+python -m arhmm run --dry-run configs/runs/dino_k3.yml
+python -m arhmm run    configs/runs/dino_k3.yml
 ```
 
 **Every step is skipped when its key and artifacts are still current — run-local ones too.**
@@ -106,12 +106,12 @@ and takes its own `--force`; without it a current step prints `nothing to do`:
 
 ```bash
 PYTHONPATH=$PWD conda run --no-capture-output -n treeHMM_env \
-  python -m treearhmm.steps.fit --run-dir analysis/runs/dino_k3 --force
+  python -m arhmm.steps.fit --run-dir analysis/runs/dino_k3 --force
 ```
 
 ## Create New Features
 
-**A track feature is one decorated function in `treearhmm/core/trackfeatures.py`.**
+**A track feature is one decorated function in `arhmm/core/trackfeatures.py`.**
 Nothing else changes: config validation, the emission vector, the plots, the CSV
 headers and the held-out diagnostics all read `FEATURE_REGISTRY`.
 
@@ -154,11 +154,11 @@ Four rules that are load-bearing:
 2. **Temporal features step over a cell's *active* frames.** `SeriesBundle` exposes only
    `prev`, `gap`, `window`, `displacement`, `prev_centroids` — there is deliberately no
    `t - 1` indexing, because a tracking gap would otherwise look like a teleport.
-3. **Keep imports light.** This module is imported by `treearhmm.config`, hence by every
+3. **Keep imports light.** This module is imported by `arhmm.config`, hence by every
    step in all three envs — only one of which has scikit-image. Import skimage *inside*
    the function (see `_dilated_t_cell_neighbors`).
 4. If you change an **existing** feature's math, hand-bump `version` on the `features`
-   `Step` in `treearhmm/layout.py`. Adding a new feature needs no bump — it changes
+   `Step` in `arhmm/layout.py`. Adding a new feature needs no bump — it changes
    `computed_features`, so the cache key moves on its own.
 
 Then use it: `features.compute: all` picks it up automatically; add the name to
@@ -169,11 +169,11 @@ distribution figure — that is what makes a state description checkable.
 Verify with `tests/test_features.py` (`python -m unittest discover -s tests -t tests`)
 and a smoke run.
 
-Bigger additions, documented in `treearhmm/README.md`:
+Bigger additions, documented in `arhmm/README.md`:
 - **A whole modality** (GPU, own env, k anonymous dimensions): a `Provider` in
-  `treearhmm/core/providers.py` plus a step in `treearhmm/steps/` registered in
+  `arhmm/core/providers.py` plus a step in `arhmm/steps/` registered in
   `layout.STEPS`. `steps/fit.py` needs no change.
-- **A new output**: a module in `treearhmm/extras/` exposing `REQUIRES` and
+- **A new output**: a module in `arhmm/extras/` exposing `REQUIRES` and
   `run(cfg, layout, out_dir)`. Discovery is by filename; keep module-level imports
   light because config validation imports it just to read `REQUIRES`.
 
@@ -194,8 +194,8 @@ model:
 `extends` is a path relative to the extending file's own directory.
 
 ```bash
-python -m treearhmm run --dry-run configs/runs/dino_k5.yml   # see what is cached vs. RUN
-python -m treearhmm run           configs/runs/dino_k5.yml
+python -m arhmm run --dry-run configs/runs/dino_k5.yml   # see what is cached vs. RUN
+python -m arhmm run           configs/runs/dino_k5.yml
 ```
 
 Rules worth knowing before you write the file:
@@ -203,7 +203,7 @@ Rules worth knowing before you write the file:
 - **Merge rule: mappings merge key by key; every other type, including lists, is
   replaced wholesale.** `model: {features: [area]}` yields exactly `[area]`, not the
   inherited list plus `area`. `null` deletes an inherited key. So **check what you are
-  inheriting before overriding a list** — `python -m treearhmm show <config>` prints the
+  inheriting before overriding a list** — `python -m arhmm show <config>` prints the
   resolved document. The usual trap: `_smoke.yml` already sets
   `outputs.extras: [state_timeline, condition_stats]` and `features.compute` to an explicit
   five-feature list, so a child writing `extras: [state_timeline]` silently *drops*
@@ -230,4 +230,4 @@ CLI switches between them automatically; you only name one when running a step b
 
 - The CLI driver itself runs from any env with PyYAML + numpy — conda `base` is the usual
   choice. It puts the repo root on `PYTHONPATH` for each child, which is what makes
-  `treearhmm` and `models.tarhmm` importable without the repo being pip-installed.
+  `arhmm` and `models.tarhmm` importable without the repo being pip-installed.

@@ -26,8 +26,8 @@ def run(cfg: dict, layout, out_dir: Path) -> None:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    from treearhmm import config as cfgmod
-    from treearhmm.core import io, viz
+    from arhmm import config as cfgmod
+    from arhmm.core import io, viz
 
     fit_dir = layout.fit_dir
     states = np.load(fit_dir / "state_assignments.npy")

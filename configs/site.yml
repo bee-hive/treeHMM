@@ -34,13 +34,13 @@ paths:
   output_root: /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/treeHMM/analysis/runs
   cache_root: /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/treeHMM/analysis/cache
 
-  # Put on PYTHONPATH for every step, so `treearhmm` and `models.tarhmm` import
+  # Put on PYTHONPATH for every step, so `arhmm` and `models.tarhmm` import
   # without this repo being pip-installed.
   repo_root: /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/treeHMM
 
 # Conda environments, one per step role.  There is NO environment named
 # `occident` -- older docs said so and were wrong.  `AnalysisEnv` exists but is
-# Python 3.14 and unrelated.  `treearhmm doctor` checks all three resolve.
+# Python 3.14 and unrelated.  `arhmm doctor` checks all three resolve.
 envs:
   imaging: OccidentAnalysis   # numpy 1.26, skimage, tifffile, matplotlib, imageio
   dino: cs229Dino             # torch, transformers, sklearn  (numpy 2.4)

@@ -1,14 +1,14 @@
-"""The `treearhmm` command line: create, run and inspect runs.
+"""The `arhmm` command line: create, run and inspect runs.
 
-    treearhmm run     configs/my_run.yml    create the run and execute it
-    treearhmm status  configs/my_run.yml    what is current, what would rerun
-    treearhmm show    configs/my_run.yml    the fully resolved configuration
-    treearhmm list                          runs that exist under output_root
-    treearhmm doctor  [configs/my_run.yml]  environments, paths, CUDA, npz round trip
+    arhmm run     configs/my_run.yml    create the run and execute it
+    arhmm status  configs/my_run.yml    what is current, what would rerun
+    arhmm show    configs/my_run.yml    the fully resolved configuration
+    arhmm list                          runs that exist under output_root
+    arhmm doctor  [configs/my_run.yml]  environments, paths, CUDA, npz round trip
 
 Steps run as subprocesses under `conda run -n <env>`, because the chain spans
 three environments.  `PYTHONPATH` is set to the repo root for each child, which
-is what makes both `treearhmm` and `models.tarhmm` importable without this repo
+is what makes both `arhmm` and `models.tarhmm` importable without this repo
 being pip-installed.
 """
 
@@ -22,9 +22,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from treearhmm import config as cfgmod
-from treearhmm import layout as layoutmod
-from treearhmm.core import io
+from arhmm import config as cfgmod
+from arhmm import layout as layoutmod
+from arhmm.core import io
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -139,17 +139,6 @@ def run_step(cfg: dict, layout: layoutmod.Layout, step: layoutmod.Step, force: b
         # Keep JAX from grabbing the whole card, so a stray notebook on the same
         # GPU does not turn a fit into an OOM.
         child_env.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
-        # Bit-exact reruns.  Without these, two runs of the same fit on the same
-        # inputs differ in the last few digits of the log probability: XLA
-        # autotunes its kernels per process and picks different reduction orders,
-        # and float32 accumulation is not associative.  State assignments were
-        # stable regardless, but a log probability that moves under a rerun is
-        # not something anyone should have to reason about.  Measured: autotuning
-        # is what matters here; deterministic_ops alone does not settle it.
-        child_env.setdefault(
-            "XLA_FLAGS",
-            "--xla_gpu_deterministic_ops=true --xla_gpu_autotune_level=0",
-        )
 
     command = [
         "conda", "run", "--no-capture-output", "-n", env_name,
@@ -313,7 +302,7 @@ def cmd_doctor(args) -> int:
     """Check that the machine can actually run the pipeline."""
     config_path = args.config or (REPO_ROOT / "configs" / "_smoke.yml")
     problems: list[str] = []
-    print(io.banner("treearhmm doctor"))
+    print(io.banner("arhmm doctor"))
 
     try:
         cfg = cfgmod.load_config(config_path)
@@ -358,13 +347,16 @@ def cmd_doctor(args) -> int:
         problems.append("npz written in the model env could not be read in the imaging env")
         print("  FAIL  npz round trip")
 
+    # The probe must name a file that actually exists: `git check-ignore` reports
+    # "not ignored" for any path it cannot find, so probing a stale path passes
+    # vacuously and the check silently stops guarding anything.
     ignored = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "check-ignore", "treearhmm/core/config.py"],
+        ["git", "-C", str(REPO_ROOT), "check-ignore", "arhmm/core/io.py"],
         capture_output=True, text=True, check=False,
     )
     if ignored.returncode == 0:
-        problems.append("treearhmm/core is gitignored -- check .gitignore for an unanchored lib/")
-        print("  FAIL  treearhmm/core/config.py is gitignored")
+        problems.append("arhmm/core is gitignored -- check .gitignore for an unanchored lib/")
+        print("  FAIL  arhmm/core/io.py is gitignored")
     else:
         print("  ok    package source is not gitignored")
 
@@ -405,7 +397,7 @@ def _npz_roundtrip(cfg: dict) -> bool:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="treearhmm", description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(prog="arhmm", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
 
     run = sub.add_parser("run", help="create the run and execute its steps")

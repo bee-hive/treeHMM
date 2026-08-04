@@ -5,7 +5,7 @@ that fails takes only itself down.  Each one gets its own directory under
 `{run}/outputs/extras/{name}/`, and its exception -- if any -- is recorded in
 the step's stamp and printed with a traceback rather than swallowed.
 
-The step exits non-zero when any extra failed, so `treearhmm run` reports the
+The step exits non-zero when any extra failed, so `arhmm run` reports the
 problem; but because the step is marked optional in `layout.STEPS`, the run as a
 whole still counts the base outputs as delivered.
 
@@ -17,10 +17,10 @@ from __future__ import annotations
 import sys
 import traceback
 
-from treearhmm import config as cfgmod
-from treearhmm import extras as extras_pkg
-from treearhmm.core import io
-from treearhmm.steps import step_main
+from arhmm import config as cfgmod
+from arhmm import extras as extras_pkg
+from arhmm.core import io
+from arhmm.steps import step_main
 
 
 def _run(cfg: dict, layout, args) -> dict:

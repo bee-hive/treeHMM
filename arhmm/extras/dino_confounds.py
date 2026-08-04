@@ -69,8 +69,8 @@ def run(cfg: dict, layout, out_dir: Path) -> None:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    from treearhmm import config as cfgmod
-    from treearhmm.core import io, viz
+    from arhmm import config as cfgmod
+    from arhmm.core import io, viz
 
     columns = cfgmod.dino_column_names(cfg)
     if not columns:

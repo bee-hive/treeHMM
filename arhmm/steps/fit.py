@@ -56,9 +56,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from treearhmm import config as cfgmod
-from treearhmm.core import io, lineage, providers
-from treearhmm.steps import step_main
+from arhmm import config as cfgmod
+from arhmm.core import io, lineage, providers
+from arhmm.steps import step_main
 
 
 @dataclass(frozen=True)
