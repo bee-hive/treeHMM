@@ -7,13 +7,27 @@ plain numpy and imports anywhere, so its unit tests run in all three conda
 environments rather than only the DINO one.
 
 The patch handed to DINOv2 is not a raw crop.  It is the greyscale phase image
-with the cell-type masks alpha-blended over it:
+centred on the cancer cell, plus **at most one** overlay, selected by
+`dino.patch_overlay`:
+
+    rfp      RFP intensity added to the red channel at `rfp_alpha`; the
+             cell-type masks are not drawn at all.
+    masks    the cell-type masks alpha-blended at `mask_alpha`; RFP unused.
+    none     plain phase, neither overlay.
+
+The two are exclusive by construction rather than by preference.  `masks` spends
+every hue on a cell type --
 
     T cells         green
     other cancer    blue
     the subject     red
 
-Two details carry most of the value, and both were arrived at the hard way:
+-- so RFP has no channel left to occupy, which is the whole reason `rfp` mode
+turns the masks off.  Note what `rfp` and `none` give up: with no mask painted,
+the subject cell is identified only by being at the centre of the patch.
+
+Two details carry most of the value in `masks` mode, and both were arrived at
+the hard way:
 
   * **Blend, do not flat-fill.** At `mask_alpha` the phase texture inside the
     mask -- blebbing, the refractile halo, granularity -- survives into the
@@ -24,10 +38,6 @@ Two details carry most of the value, and both were arrived at the hard way:
     overlapping a neighbour comes out red-over-blue, so the embedding encodes
     *overlap* rather than identity.  Compositing the subject from the image that
     has only the T-cell layer keeps its colour a function of the cell alone.
-
-RFP, when included, goes into luminance rather than a hue: all three channels
-are already spent on cell types, so adding it as red would collide with the
-subject mask.
 
 The patch is a fixed `patch_px` window around the rounded centroid, taken from
 an edge-padded image.  Padding first means every cell gets a full-size window
@@ -126,6 +136,23 @@ def _blend(image: np.ndarray, mask: np.ndarray, colour: Sequence[float], alpha: 
     return out
 
 
+def effective_mask_alpha(params: dict) -> float:
+    """`mask_alpha`, or 0 when the overlay mode does not paint the masks.
+
+    `subject_patch` never sees the mode, so this is what keeps its repaint in
+    step with `compose_frame`.
+
+    Args:
+        params (dict): the config's `dino` block.
+
+    Returns:
+        float: the blend weight to use for every mask in this mode.
+    """
+    if params.get("patch_overlay", "none") != "masks":
+        return 0.0
+    return float(params["mask_alpha"])
+
+
 def compose_frame(
     phase: np.ndarray,
     cancer: np.ndarray,
@@ -139,7 +166,8 @@ def compose_frame(
         phase (np.ndarray): `(H, W)` float in [0, 1], normalized over the stack.
         cancer (np.ndarray): `(H, W)` cancer label image.
         tcells (np.ndarray): `(H, W)` T-cell label image.
-        rfp (np.ndarray | None): `(H, W)` float in [0, 1], or None.
+        rfp (np.ndarray | None): `(H, W)` float in [0, 1].  Required by the `rfp`
+            overlay, ignored by the other two.
         params (dict): the config's `dino` block.
 
     Returns:
@@ -148,12 +176,26 @@ def compose_frame(
                 Subject cells are repainted from this, so a subject overlapping
                 another cancer cell does not come out red-over-blue.
             all_cancer (np.ndarray): `shared` plus every cancer cell in blue.
+
+        Outside `masks` mode nothing is painted, so both are the same image.
+
+    Raises:
+        ValueError: the `rfp` overlay was asked for without an RFP channel.
     """
+    overlay = params.get("patch_overlay", "none")
     base = np.repeat(phase[..., None].astype(np.float32), 3, axis=2)
-    if rfp is not None and params.get("include_rfp"):
-        # Into luminance, not a hue: the three hues are spent on cell types.
+
+    if overlay == "rfp":
+        if rfp is None:
+            raise ValueError("dino.patch_overlay is 'rfp', but no RFP channel was given")
+        # Red, not luminance: with the masks off, the hue is free.
         alpha = float(params.get("rfp_alpha", 0.3))
-        base = np.clip(base + alpha * rfp[..., None].astype(np.float32), 0.0, 1.0)
+        base[..., 0] = np.clip(base[..., 0] + alpha * rfp.astype(np.float32), 0.0, 1.0)
+
+    if overlay != "masks":
+        # Aliased deliberately: `subject_patch` copies `all_cancer` before it
+        # reads `shared`, and at mask_alpha 0 its repaint is a no-op anyway.
+        return base, base
 
     mask_alpha = float(params["mask_alpha"])
     shared = _blend(base, tcells > 0, params["tcell_colour"], mask_alpha)
@@ -217,7 +259,7 @@ def iter_patches(
         tuple[int, int, np.ndarray]: frame index, column index, `(P, P, 3)` uint8.
     """
     patch_px = int(params["patch_px"])
-    mask_alpha = float(params["mask_alpha"])
+    mask_alpha = effective_mask_alpha(params)
     subject_colour = params["subject_colour"]
 
     for t in range(crop.num_frames):

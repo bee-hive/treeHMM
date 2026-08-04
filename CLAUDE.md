@@ -50,12 +50,12 @@ right env itself.
 ```bash
 cd /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/treeHMM
 
-python -m arhmm doctor configs/runs/dino_k3.yml     # envs, paths, CUDA, npz round-trip
+python -m arhmm doctor configs/runs/dino_k5.yml     # envs, paths, CUDA, npz round-trip
 python -m arhmm list   configs/_smoke.yml           # run directories under output_root
-python -m arhmm show   configs/runs/dino_k3.yml     # fully resolved config
-python -m arhmm status configs/runs/dino_k3.yml     # which steps are current, and why
-python -m arhmm run --dry-run configs/runs/dino_k3.yml
-python -m arhmm run    configs/runs/dino_k3.yml
+python -m arhmm show   configs/runs/dino_k5.yml     # fully resolved config
+python -m arhmm status configs/runs/dino_k5.yml     # which steps are current, and why
+python -m arhmm run --dry-run configs/runs/dino_k5.yml
+python -m arhmm run    configs/runs/dino_k5.yml
 ```
 
 **Every step is skipped when its key and artifacts are still current — run-local ones too.**
@@ -106,7 +106,7 @@ and takes its own `--force`; without it a current step prints `nothing to do`:
 
 ```bash
 PYTHONPATH=$PWD conda run --no-capture-output -n treeHMM_env \
-  python -m arhmm.steps.fit --run-dir analysis/runs/dino_k3 --force
+  python -m arhmm.steps.fit --run-dir analysis/runs/dino_k5 --force
 ```
 
 ## Create New Features
@@ -184,9 +184,9 @@ differently**, then run it.
 
 ```yaml
 # configs/runs/dino_k5.yml
-extends: dino_k3.yml            # resolved relative to THIS file; ultimately -> default.yml -> site.yml
+extends: dino_k5.yml            # resolved relative to THIS file; ultimately -> default.yml -> site.yml
 run_name: dino_k5               # the directory under analysis/runs/; ^[A-Za-z0-9_][A-Za-z0-9_.-]*$
-description: As dino_k3, five states.
+description: As dino_k5, five states.
 model:
   num_states: 5
 ```

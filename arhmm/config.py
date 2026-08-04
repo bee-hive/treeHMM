@@ -55,6 +55,9 @@ _RUN_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
 
 CELL_SOURCES = ("phase", "nuclei")
 INIT_METHODS = ("kmeans", "prior", "random")
+#: What is drawn over the phase patch handed to DINOv2.  At most one of them:
+#: `rfp` can use the red channel only because `masks` is not.
+PATCH_OVERLAYS = ("rfp", "masks", "none")
 
 #: Features that describe a whole cell body and are meaningless on a nucleus mask.
 _BODY_SHAPE_FEATURES = frozenset({"solidity", "extent", "aspect_ratio", "eccentricity"})
@@ -554,6 +557,11 @@ def validate(cfg: dict) -> None:
             raise ConfigError(f"model.use_dino_pcs is set, so dino.n_pcs must be >= 1 (got {n_pcs!r})")
         if not get_path(cfg, "dino.model_path", None):
             raise ConfigError("model.use_dino_pcs is set, so dino.model_path must be given")
+        overlay = get_path(cfg, "dino.patch_overlay", "none")
+        if overlay not in PATCH_OVERLAYS:
+            raise ConfigError(
+                f"dino.patch_overlay must be one of {PATCH_OVERLAYS}, got {overlay!r}"
+            )
 
     dim = len(emission_names(cfg))
     if dim == 0:

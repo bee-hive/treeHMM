@@ -61,16 +61,23 @@ dino:
                              # kmeans init degenerates to a 1-D split on PC1
   batch_size: 256            # throughput only; deliberately not in the cache key
 
-  # The patch is greyscale phase with cell-type masks alpha-blended over it.
+  # The patch is greyscale phase centred on the cancer cell, plus AT MOST ONE
+  # overlay.  The two are exclusive by construction, not by preference: RFP can
+  # take the red channel only because the cell-type masks are not using it.
+  #   rfp     RFP intensity added to the red channel at rfp_alpha; masks not drawn
+  #   masks   cell-type masks alpha-blended at mask_alpha; RFP unused
+  #   none    plain phase, neither overlay
+  # Under rfp and none the subject cell is marked only by being at the centre.
+  patch_overlay: none
+
   # Blending rather than flat-filling keeps the phase texture (blebbing, halo)
   # visible inside the mask, which is most of what makes the embedding useful.
+  # NOTE: at 0.0, `patch_overlay: masks` renders plain phase -- raise this too.
   mask_alpha: 0.0
   subject_colour: [1.0, 0.0, 0.0]        # the cell being embedded
   other_cancer_colour: [0.0, 0.0, 1.0]   # other cancer cells in the patch
   tcell_colour: [0.0, 1.0, 0.0]
-  include_rfp: false         # when true, RFP goes into luminance, not a hue:
-  rfp_alpha: 0.3             # all three hues are already spent on cell types
-  norm_percentiles: [1.0, 99.0]
+  rfp_alpha: 0.3             # strength of the red RFP overlay
 
 model:
   # ORDERED.  This list, followed by the DINO PCs when use_dino_pcs is set, IS

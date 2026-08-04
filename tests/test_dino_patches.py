@@ -21,11 +21,11 @@ import conftest  # noqa: F401
 from arhmm.core import dino as D
 
 PARAMS = dict(
+    patch_overlay="masks",
     mask_alpha=0.45,
     subject_colour=[1.0, 0.0, 0.0],
     other_cancer_colour=[0.0, 0.0, 1.0],
     tcell_colour=[0.0, 1.0, 0.0],
-    include_rfp=False,
     rfp_alpha=0.3,
     patch_px=50,
 )
@@ -127,22 +127,76 @@ class Composition(unittest.TestCase):
         dark = int(patch[28, 25, 1])     # where phase was 0.2
         self.assertGreater(bright, dark + 20, "the mask was flat-filled, losing texture")
 
-    def test_rfp_goes_into_luminance_not_a_hue(self):
-        phase, cancer, tcells = scene([(7, (60, 70, 60, 70))])
-        rfp = np.zeros_like(phase)
-        rfp[60:70, 60:70] = 1.0
-        params = dict(PARAMS, include_rfp=True, rfp_alpha=0.3)
-        shared_off, _ = D.compose_frame(phase, cancer, tcells, None, PARAMS)
-        shared_on, _ = D.compose_frame(phase, cancer, tcells, rfp, params)
-        delta = shared_on[65, 65] - shared_off[65, 65]
-        self.assertTrue(np.allclose(delta, delta[0], atol=1e-6),
-                        "RFP shifted the hue instead of the luminance")
-        self.assertGreater(float(delta[0]), 0.0)
-
     def test_background_is_left_alone(self):
         phase, cancer, tcells = scene([(7, (60, 70, 60, 70))])
         shared, all_cancer = D.compose_frame(phase, cancer, tcells, None, PARAMS)
         np.testing.assert_allclose(all_cancer[10, 10], [0.5, 0.5, 0.5], atol=1e-6)
+
+
+class OverlayModes(unittest.TestCase):
+    """`patch_overlay` selects at most one overlay.
+
+    The class above covers `masks`, which is what PARAMS asks for.  What matters
+    here is that the other two modes really do suppress the mask painting --
+    including the subject repaint, which happens in `subject_patch` and so is
+    reachable only through `effective_mask_alpha`.
+    """
+
+    def test_effective_mask_alpha_follows_the_mode(self):
+        self.assertEqual(D.effective_mask_alpha(PARAMS), 0.45)
+        for mode in ("rfp", "none"):
+            with self.subTest(mode):
+                params = dict(PARAMS, patch_overlay=mode)
+                self.assertEqual(D.effective_mask_alpha(params), 0.0)
+
+    def test_rfp_overlay_raises_only_the_red_channel(self):
+        phase, cancer, tcells = scene([(7, (60, 70, 60, 70))])
+        rfp = np.zeros_like(phase)
+        rfp[60:70, 60:70] = 1.0
+        params = dict(PARAMS, patch_overlay="rfp", rfp_alpha=0.3)
+        shared, _ = D.compose_frame(phase, cancer, tcells, rfp, params)
+        np.testing.assert_allclose(shared[..., 1], phase, atol=1e-6)
+        np.testing.assert_allclose(shared[..., 2], phase, atol=1e-6)
+        self.assertAlmostEqual(float(shared[65, 65, 0]), 0.8, places=5)   # 0.5 + 0.3
+        self.assertAlmostEqual(float(shared[10, 10, 0]), 0.5, places=5)   # no RFP here
+
+    def test_rfp_overlay_clips_rather_than_wrapping(self):
+        """The accepted trade-off: RFP saturates where phase is already bright."""
+        phase = np.full((150, 150), 0.9, np.float32)
+        cancer = np.zeros((150, 150), np.int32)
+        params = dict(PARAMS, patch_overlay="rfp", rfp_alpha=0.3)
+        shared, _ = D.compose_frame(phase, cancer, cancer, np.ones_like(phase), params)
+        self.assertAlmostEqual(float(shared[10, 10, 0]), 1.0, places=6)
+
+    def test_rfp_overlay_leaves_the_masks_unpainted(self):
+        phase, cancer, tcells = scene(
+            [(7, (60, 70, 60, 70)), (8, (60, 70, 90, 100))],
+            [(1, (100, 110, 60, 70))],
+        )
+        params = dict(PARAMS, patch_overlay="rfp")
+        # RFP is flat zero, so a uniform patch proves no hue was painted anywhere.
+        shared, all_cancer = D.compose_frame(phase, cancer, tcells, np.zeros_like(phase),
+                                             params)
+        patch = D.subject_patch(shared, all_cancer, cancer == 7, (64.5, 64.5), 100,
+                                params["subject_colour"], D.effective_mask_alpha(params))
+        self.assertEqual(patch.min(), patch.max(), "a cell-type mask was painted")
+
+    def test_rfp_overlay_without_an_rfp_channel_is_an_error(self):
+        params = dict(PARAMS, patch_overlay="rfp")
+        with self.assertRaises(ValueError):
+            D.compose_frame(*scene([(7, (60, 70, 60, 70))]), None, params)
+
+    def test_none_overlay_is_plain_phase(self):
+        phase, cancer, tcells = scene(
+            [(7, (60, 70, 60, 70)), (8, (60, 70, 90, 100))],
+            [(1, (100, 110, 60, 70))],
+        )
+        params = dict(PARAMS, patch_overlay="none")
+        shared, all_cancer = D.compose_frame(phase, cancer, tcells, None, params)
+        patch = D.subject_patch(shared, all_cancer, cancer == 7, (64.5, 64.5), 100,
+                                params["subject_colour"], D.effective_mask_alpha(params))
+        self.assertEqual(patch.min(), patch.max(), "something was painted over the phase")
+        self.assertEqual(int(patch[50, 50, 0]), 127)   # the 0.5 background, as uint8
 
 
 class ModelSourceResolution(unittest.TestCase):

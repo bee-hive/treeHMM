@@ -140,7 +140,7 @@ Check that all three resolve, along with paths, CUDA and the cross-environment
 `.npz` contract:
 
 ```bash
-python -m arhmm doctor configs/runs/dino_k3.yml
+python -m arhmm doctor configs/runs/dino_k5.yml
 ```
 
 ### Which code runs in which environment
