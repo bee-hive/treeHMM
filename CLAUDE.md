@@ -123,7 +123,7 @@ def _my_ratio(fb):                      # fb: FrameBundle -> (N,) float, NaN whe
     return fb.prop("area") / fb.prop("area").max()
 
 @temporal("my_delta", units="", depends=("area",), uses=("window_frames",),
-          doc="one sentence")
+          doc="one sentence", derived=True)
 def _my_delta(sb):                      # sb: SeriesBundle -> (T, N) float
     return sb.values["area"] - sb.prev("area")
 ```
@@ -144,6 +144,13 @@ The decorator arguments, none of which are cosmetic:
   A regionprops column via `fb.prop("area")` is not a dependency; `sb.values["area"]` is.
 - `needs_image` — set when it reads the phase/RFP stack (`fb.image`, `(H, W, 2)`,
   normalized over the whole stack).
+- `derived` — `@temporal` only. Set it when the feature is a *change* in another
+  quantity, a difference or a trailing spread, rather than a quantity in its own
+  right. `velocity` is **not** derived: it is a real per-frame speed. The only
+  reader is `feature_distributions.png`, which plots actual values and sends the
+  derived ones to `state_feature_summary.csv` alone — unless `model.features`
+  names one, which is still plotted so the figure never hides an emission. It
+  enters no cache key and changes nothing about what is computed.
 
 Return NaN for both the absent and the undefined case — `np.where(cond, value, np.nan)`
 inside `np.errstate(...)`, as `_circularity` and `_win_std_log_area` do. Never `inf`.

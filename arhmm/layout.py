@@ -154,7 +154,9 @@ STEPS: tuple[Step, ...] = (
         shared=False,
         # v2: the cell-age histogram starts at cells.warmup_frames rather than
         # at age 0, which no config key expresses.
-        version=2,
+        # v3: feature_distributions.png plots actual values only -- features
+        # flagged `derived` in the registry go to the CSV alone.
+        version=3,
         summary="overlay videos, feature and cell-age distributions, transitions, assignments",
     ),
     Step(

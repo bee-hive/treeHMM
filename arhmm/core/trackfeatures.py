@@ -59,6 +59,12 @@ class Feature:
             not clipped -- they are counted and reported by the features step,
             because a value that cannot exist means the estimator broke down and
             that is worth knowing rather than hiding.
+        derived (bool): this describes how another quantity *changes* -- a
+            difference, or a trailing spread -- rather than being a quantity in
+            its own right.  `velocity` is not derived: it is a real per-frame
+            speed, not the change in another feature.  Only the distribution
+            figure reads this, to plot actual values rather than deltas; it is
+            not part of any cache key and never affects what is computed.
     """
 
     name: str
@@ -70,6 +76,7 @@ class Feature:
     uses: tuple[str, ...] = ()
     needs_image: bool = False
     bounds: tuple[float, float] | None = None
+    derived: bool = False
 
 
 FEATURE_REGISTRY: dict[str, Feature] = {}
@@ -94,11 +101,16 @@ def per_frame(name, *, units, doc, uses=(), needs_image=False, bounds=None):
     return decorate
 
 
-def temporal(name, *, units, doc, depends=(), uses=()):
-    """Register a temporal feature: `(SeriesBundle) -> (T, N) float`."""
+def temporal(name, *, units, doc, depends=(), uses=(), derived=False):
+    """Register a temporal feature: `(SeriesBundle) -> (T, N) float`.
+
+    Set `derived` when the feature is a change in another quantity -- a
+    difference or a trailing spread -- rather than a quantity itself.
+    """
 
     def decorate(fn):
-        _register(Feature(name, TEMPORAL, units, doc, fn, depends=tuple(depends), uses=tuple(uses)))
+        _register(Feature(name, TEMPORAL, units, doc, fn, depends=tuple(depends),
+                          uses=tuple(uses), derived=derived))
         return fn
 
     return decorate
@@ -432,6 +444,7 @@ def _velocity(sb: SeriesBundle) -> np.ndarray:
     units="",
     depends=("area",),
     doc="(area - previous area) / previous area; scale-free, so an acute collapse is visible",
+    derived=True,
 )
 def _d_area_frac(sb: SeriesBundle) -> np.ndarray:
     previous = sb.prev("area")
@@ -445,6 +458,7 @@ def _d_area_frac(sb: SeriesBundle) -> np.ndarray:
     units="",
     depends=("circularity",),
     doc="circularity minus circularity at the previous active frame",
+    derived=True,
 )
 def _d_circularity(sb: SeriesBundle) -> np.ndarray:
     return sb.values["circularity"] - sb.prev("circularity")
@@ -456,6 +470,7 @@ def _d_circularity(sb: SeriesBundle) -> np.ndarray:
     depends=("area",),
     uses=("window_frames",),
     doc="trailing standard deviation of log(area) over window_frames active frames",
+    derived=True,
 )
 def _win_std_log_area(sb: SeriesBundle) -> np.ndarray:
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -469,6 +484,7 @@ def _win_std_log_area(sb: SeriesBundle) -> np.ndarray:
     depends=("circularity",),
     uses=("window_frames",),
     doc="trailing standard deviation of circularity over window_frames active frames",
+    derived=True,
 )
 def _win_std_circularity(sb: SeriesBundle) -> np.ndarray:
     return _nanstd_window(sb, sb.values["circularity"])
@@ -479,6 +495,7 @@ def _win_std_circularity(sb: SeriesBundle) -> np.ndarray:
     units="px",
     uses=("window_frames",),
     doc="trailing standard deviation of per-frame displacement over window_frames active frames",
+    derived=True,
 )
 def _win_std_displacement(sb: SeriesBundle) -> np.ndarray:
     return _nanstd_window(sb, sb.displacement())

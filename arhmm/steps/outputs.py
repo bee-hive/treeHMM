@@ -2,8 +2,8 @@
 
     overlays/{crop}_state_overlay.mp4   each cancer cell tinted by its inferred
                                         state, over the phase image
-    feature_distributions.png           distribution of every computed feature
-    state_feature_summary.csv           within each state
+    feature_distributions.png           distribution of every computed value
+    state_feature_summary.csv           within each state, derived features too
     state_age_histogram.png             state occupancy against cell age
     state_age_histogram.csv
     transition_matrix.csv / .png        learned state transition probabilities
@@ -14,7 +14,9 @@
 Distributions cover every feature in the features cache, not just the ones the
 model saw.  A state characterised only by the features it was fit on is a
 tautology; the diagnostic features are what make the description checkable, so
-the figure marks which is which.
+the figure marks which is which.  The figure plots actual values -- the `d_*`
+differences and `win_std_*` spreads are `derived` in the registry and go to the
+CSV only, unless the model was fit on one.
 
 Run inside the imaging environment.
 """
@@ -178,6 +180,14 @@ def write_feature_distributions(cfg: dict, fit: dict, out_dir: Path) -> list[Pat
     Features the model was fit on are outlined in their own colour; the rest are
     held-out diagnostics.  That distinction is the point of the figure.
 
+    The panels show **actual values**: features flagged `derived` in the registry
+    -- the `d_*` differences and the `win_std_*` trailing spreads -- describe how
+    a quantity changes rather than what it is, and a violin of a difference says
+    little about the state that a violin of the quantity does not say better.
+    They are dropped from the figure but kept in full in the CSV, and a derived
+    feature the model was actually fit on is still plotted: the figure would
+    otherwise hide an emission, which is the one thing it must not do.
+
     Args:
         cfg (dict): resolved configuration.
         fit (dict): loaded fit artifacts.
@@ -226,12 +236,19 @@ def write_feature_distributions(cfg: dict, fit: dict, out_dir: Path) -> list[Pat
                     row += [""] * 5
             writer.writerow(row)
 
+    # The CSV above keeps every feature; the figure keeps the actual values.
+    derived = {
+        name for name in names
+        if name in FEATURE_REGISTRY and FEATURE_REGISTRY[name].derived
+    }
+    plotted = [name for name in names if name in seen or name not in derived]
+
     viz.apply_style()
-    rows, cols = viz.grid_shape(len(names), max_cols)
+    rows, cols = viz.grid_shape(len(plotted), max_cols)
     figure, axes = plt.subplots(rows, cols, figsize=(3.2 * cols, 2.8 * rows), squeeze=False)
     flat = axes.ravel()
 
-    for panel, name in enumerate(names):
+    for panel, name in enumerate(plotted):
         ax = flat[panel]
         index = names.index(name)
         samples = []
@@ -264,12 +281,15 @@ def write_feature_distributions(cfg: dict, fit: dict, out_dir: Path) -> list[Pat
                 spine.set_color("#c44e52")
                 spine.set_linewidth(1.6)
 
-    for panel in range(len(names), len(flat)):
+    for panel in range(len(plotted), len(flat)):
         flat[panel].axis("off")
 
+    omitted = len(names) - len(plotted)
+    subtitle = "outlined = fed to the model, plain = held out"
+    if omitted:
+        subtitle += f"; {omitted} derived features in the CSV only"
     figure.suptitle(
-        f"{summary['run_name']}: feature distributions per state "
-        f"(outlined = fed to the model, plain = held out)",
+        f"{summary['run_name']}: feature distributions per state ({subtitle})",
         fontsize=10,
     )
     figure.tight_layout(rect=(0, 0, 1, 0.97))
