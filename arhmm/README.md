@@ -67,12 +67,13 @@ replaced wholesale.** A run writing `model: {features: [area]}` gets exactly
 `[area]`, not the defaults plus `area`. `null` deletes an inherited key.
 
 `cells.source` picks which segmentation defines a cell: `phase` (CVAT whole-body
-tracks) or `nuclei` (Caliban cancer nuclei). It swaps the label space whole --
+tracks) or `nuclei` (the cancer-nuclei tracks, `nuclei_tracks.tiff`, which sit in
+the crop directory beside `crop.tiff`). It swaps the label space whole --
 track features, centroids, DINO patches, the fit and the overlays all follow --
 and only `core/cells.py` branches on it. The two ID spaces are never reconciled;
-under `nuclei` the T-cell masks still come from the CVAT stack, because Caliban
-segmented the cancer nuclei only. Both sources hash into the `features` and
-`dino` keys, so the caches cannot mix.
+under `nuclei` the T-cell masks still come from the CVAT stack, because the
+nucleus segmentation covers the cancer cells only. Both sources hash into the
+`features` and `dino` keys, so the caches cannot mix.
 
 The resolved document is frozen into the run directory as
 `config.resolved.yml` *before anything executes*, and every step reads that. If
@@ -278,10 +279,10 @@ cells are left that old, and the counts alone cannot tell those apart.
     `cells.source: nuclei`, so a state description does not transfer between the
     two sources. Provenance is recorded as `cell_source` in the features cache's
     `meta.json`.
-  - Track counts and lengths differ substantially -- 14 nuclei against 16 CVAT
-    cancer ids in `B4_t50…`, 38 against 51 in `E4_t250…` -- so `cells.min_frames`
-    and `cells.warmup_frames` may want revisiting for a nuclei run. Their
-    defaults are tuned for `phase`.
+  - Track counts and lengths differ substantially -- 27 nucleus labels against
+    16 CVAT cancer ids in `B4_t50…`, 71 against 51 in `E4_t250…` -- so
+    `cells.min_frames` and `cells.warmup_frames` may want revisiting for a
+    nuclei run. Their defaults are tuned for `phase`.
 - Nothing imports `MarsonImagingPipeline`. The handful of helpers that were used
   from it are reimplemented in `core/viz.py`.
 

@@ -22,16 +22,16 @@ Two definitions of a cancer cell are implemented, chosen by `cells.source`:
             ALL_cancer_ids.pkl.  Masks cover the whole cell body, so shape
             features describe the cell.
 
-    nuclei  Cancer cells are the Caliban nuclei tracks.  Cell identity is
-            cleaner, but the masks are nuclei, so shape features describe the
-            nucleus, and a fixed dilation radius reaches less far out of it.
+    nuclei  Cancer cells are the nuclei tracks.  Cell identity is cleaner, but
+            the masks are nuclei, so shape features describe the nucleus, and a
+            fixed dilation radius reaches less far out of it.
 
-The Caliban nuclei live in a **flat** tree -- one file per crop, with no
-per-well directory level, unlike either tree above:
+The nuclei tracks sit in the crop's own directory, beside the image it is
+aligned with, so they share a root with it rather than having one of their own:
 
-    {caliban_tracks_dir}/{crop_id}.tiff   (T, H, W, 1) int64
+    {image_crops_dir}/{well}/{crop_id}/nuclei_tracks.tiff   (T, H, W) int32
 
-Caliban ran on the cancer nuclei only.  There is no T-cell equivalent and no
+They cover the cancer nuclei only.  There is no T-cell equivalent and no
 `ALL_cancer_ids.pkl` analogue, so every non-zero label in that file is a cancer
 cell, and the T-cell masks still come from the CVAT stack under
 `cells.source: nuclei`.  That leaves a crop described by two unrelated ID
@@ -122,15 +122,15 @@ def image_path(cfg: dict, crop_id: str) -> Path:
 
 
 def nucleus_tracks_path(cfg: dict, crop_id: str) -> Path:
-    """The crop's Caliban nucleus tracks.
+    """The crop's nucleus tracks.
 
-    Unlike the CVAT tracks and the image crops, these are stored flat: one
-    `{crop_id}.tiff` directly under the root, with no per-well directory level.
+    These live in the crop directory alongside `crop.tiff`, so they come off the
+    image root rather than a root of their own.
     """
     from arhmm.config import get_path
 
-    root = Path(get_path(cfg, "paths.caliban_tracks_dir"))
-    return root / f"{crop_id}.tiff"
+    root = Path(get_path(cfg, "paths.image_crops_dir"))
+    return root / well_of(crop_id) / crop_id / "nuclei_tracks.tiff"
 
 
 def _read_tiff(path: Path) -> np.ndarray:
@@ -223,11 +223,11 @@ def _load_cvat_tracks(cfg: dict, crop_id: str) -> tuple[np.ndarray, np.ndarray, 
 
 
 def _load_nucleus_tracks(cfg: dict, crop_id: str) -> tuple[np.ndarray, np.ndarray]:
-    """Read the crop's Caliban nucleus tracks and the labels in them.
+    """Read the crop's nucleus tracks and the labels in them.
 
-    Every non-zero label is a cancer nucleus -- Caliban never saw the T cells --
-    so unlike the CVAT stack there is no ID list to consult and nothing to
-    filter out.
+    Every non-zero label is a cancer nucleus -- the segmentation never saw the
+    T cells -- so unlike the CVAT stack there is no ID list to consult and
+    nothing to filter out.
 
     Args:
         cfg (dict): resolved configuration.
@@ -242,9 +242,9 @@ def _load_nucleus_tracks(cfg: dict, crop_id: str) -> tuple[np.ndarray, np.ndarra
     """
     path = nucleus_tracks_path(cfg, crop_id)
     nuclei = _read_tiff(path)
-    # Caliban writes a trailing singleton channel axis.  Dropping it here rather
-    # than in every consumer is what lets `CropCells.cancer` mean one shape
-    # whatever the source.
+    # Some exports carry a trailing singleton channel axis.  Dropping it here
+    # rather than in every consumer is what lets `CropCells.cancer` mean one
+    # shape whatever the source.
     if nuclei.ndim == 4 and nuclei.shape[-1] == 1:
         nuclei = nuclei[..., 0]
     if nuclei.ndim != 3:
@@ -252,8 +252,8 @@ def _load_nucleus_tracks(cfg: dict, crop_id: str) -> tuple[np.ndarray, np.ndarra
             f"{crop_id}: expected (T, H, W) or (T, H, W, 1) nucleus tracks in "
             f"{path.name}, got shape {nuclei.shape}"
         )
-    # int64 on disk, but the labels number in the tens and every other label
-    # stack in this package is int32.
+    # The labels number in the tens whatever the dtype on disk, and every other
+    # label stack in this package is int32.
     nuclei = nuclei.astype(np.int32, copy=False)
 
     labels = np.unique(nuclei)

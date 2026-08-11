@@ -7,7 +7,7 @@ nothing about the network filesystem being mounted.
 
 The point of the two sources is that they produce the *same* dataclass over a
 *different* label space: `nuclei` swaps the cancer masks and the column order for
-the Caliban nuclei and keeps the CVAT T cells, and the two ID spaces are never
+the nucleus tracks and keeps the CVAT T cells, and the two ID spaces are never
 reconciled.
 
 Uses stdlib `unittest` rather than pytest so the suite runs in all three conda
@@ -37,9 +37,9 @@ CROP = "B4_t0t3y0y6x0x6"
 
 #: CVAT ids: 1 and 2 are cancer, 5 and 6 are T cells.
 CANCER_IDS = [1, 2]
-#: Caliban labels, deliberately overlapping neither the cancer ids nor the T-cell
-#: ids in meaning -- they are a different ID space that is never mapped onto the
-#: CVAT one.
+#: Nucleus labels, deliberately overlapping neither the cancer ids nor the
+#: T-cell ids in meaning -- they are a different ID space that is never mapped
+#: onto the CVAT one.
 NUCLEUS_LABELS = [3, 7]
 
 
@@ -77,11 +77,10 @@ class LoadCrop(unittest.TestCase):
 
         self.gt_root = root / "gt"
         self.img_root = root / "img"
-        self.caliban_root = root / "caliban"
+        self.crop_images = self.img_root / "B4" / CROP
         crop_dir = self.gt_root / "B4" / CROP
         crop_dir.mkdir(parents=True)
-        (self.img_root / "B4" / CROP).mkdir(parents=True)
-        self.caliban_root.mkdir(parents=True)
+        self.crop_images.mkdir(parents=True)
 
         self.cvat = np.stack([_cvat_frame()] * 3)
         self.nuclei = np.stack([_nucleus_frame()] * 3)[..., None]
@@ -95,18 +94,18 @@ class LoadCrop(unittest.TestCase):
         _write_tiff(crop_dir / "ALL_tracks.tiff", self.cvat)
         with open(crop_dir / "ALL_cancer_ids.pkl", "wb") as handle:
             pickle.dump(CANCER_IDS, handle)
-        _write_tiff(self.img_root / "B4" / CROP / "crop.tiff", self.image)
+        _write_tiff(self.crop_images / "crop.tiff", self.image)
         self.write_nuclei(self.nuclei)
 
     def write_nuclei(self, stack: np.ndarray) -> None:
-        _write_tiff(self.caliban_root / f"{CROP}.tiff", stack)
+        """The nucleus tracks live in the crop directory, beside crop.tiff."""
+        _write_tiff(self.crop_images / "nuclei_tracks.tiff", stack)
 
     def cfg(self, source: str) -> dict:
         return {
             "paths": {
                 "ground_truth_tracks_dir": str(self.gt_root),
                 "image_crops_dir": str(self.img_root),
-                "caliban_tracks_dir": str(self.caliban_root),
             },
             "cells": {"source": source},
         }
@@ -122,7 +121,7 @@ class LoadCrop(unittest.TestCase):
 
     # ---- nuclei ---------------------------------------------------------- #
 
-    def test_nuclei_cancer_masks_are_the_squeezed_caliban_stack(self):
+    def test_nuclei_cancer_masks_are_the_squeezed_nucleus_stack(self):
         crop = cellsmod.load_crop(self.cfg("nuclei"), CROP)
         np.testing.assert_array_equal(crop.cancer, self.nuclei[..., 0])
         self.assertEqual(crop.cancer.dtype, np.int32)
@@ -134,7 +133,7 @@ class LoadCrop(unittest.TestCase):
         self.assertEqual(crop.num_cells, 2)
 
     def test_nuclei_t_cells_still_come_from_cvat(self):
-        """Caliban segmented cancer nuclei only, so the T cells are borrowed."""
+        """The nucleus tracks cover cancer only, so the T cells are borrowed."""
         crop = cellsmod.load_crop(self.cfg("nuclei"), CROP)
         np.testing.assert_array_equal(np.unique(crop.tcells), [0, 5, 6])
         np.testing.assert_array_equal(
@@ -178,6 +177,15 @@ class LoadCrop(unittest.TestCase):
         for source in ("phase", "nuclei"):
             with self.subTest(source):
                 self.assertIsNone(cellsmod.load_crop(self.cfg(source), CROP, with_image=False).image)
+
+    def test_the_nucleus_tracks_sit_beside_the_image(self):
+        """Both come off `image_crops_dir`, in the crop's own directory."""
+        cfg = self.cfg("nuclei")
+        self.assertEqual(
+            cellsmod.nucleus_tracks_path(cfg, CROP).parent,
+            cellsmod.image_path(cfg, CROP).parent,
+        )
+        self.assertEqual(cellsmod.nucleus_tracks_path(cfg, CROP).name, "nuclei_tracks.tiff")
 
     def test_an_unknown_source_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "unknown cells.source"):

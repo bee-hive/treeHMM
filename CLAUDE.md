@@ -12,8 +12,9 @@ See `README.md` for the full probabilistic model and `Derivation/` for the forwa
 - Phase Image Cell Tracks: `/gladstone/engelhardt/lab/MarsonLabIncucyteData/groundTruthTracks/TCR-T/<well_id>/<well_id>_<slice_id>/ALL_tracks.tiff`
     - shape (T, Y, X)
     - includes tracks for both cancer and T cells, cancer cells identified by `/gladstone/engelhardt/lab/MarsonLabIncucyteData/groundTruthTracks/TCR-T/<well_id>/<well_id>_<slice_id>/ALL_cancer_ids.pkl`
-- Cancer Nuclei Tracks: `/gladstone/engelhardt/lab/MarsonLabIncucyteData/groundTruthCalibanTracks/<well_id>_<slice_id>.tiff`
-    - shape (T, Y, X)
+- Cancer Nuclei Tracks: `/gladstone/engelhardt/lab/MarsonLabIncucyteData/TrackingCrops/CarnevaleRepStim/<well_id>/<well_id>_<slice_id>/nuclei_tracks.tiff`
+    - shape (T, Y, X), in the same crop directory as `crop.tiff` below
+    - supersedes the old flat `groundTruthCalibanTracks/<well_id>_<slice_id>.tiff`, whose tracks were wrong
 - Raw Phase image: `/gladstone/engelhardt/lab/MarsonLabIncucyteData/TrackingCrops/CarnevaleRepStim/<well_id>/<well_id>_<slice_id>/B4_<slice_id>/crop.tiff`
     - shape (T, Y, X, 2)
         - in last channel, 0 is RFP intensity, 1 is phase image

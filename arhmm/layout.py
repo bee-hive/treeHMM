@@ -76,7 +76,6 @@ _DERIVED = {
     "_derived.computed_features": cfgmod.computed_features,
     "_derived.feature_params": cfgmod.feature_params,
     "_derived.emission_names": cfgmod.emission_names,
-    "_derived.caliban_tracks_dir": cfgmod.caliban_dir_if_read,
 }
 
 
@@ -89,7 +88,6 @@ STEPS: tuple[Step, ...] = (
             "paths.ground_truth_tracks_dir",
             "paths.image_crops_dir",
             "cells.source",
-            "_derived.caliban_tracks_dir",
             "_derived.crop_ids",
             "_derived.computed_features",
             "_derived.feature_params",
@@ -104,7 +102,6 @@ STEPS: tuple[Step, ...] = (
         depends=(
             "paths.image_crops_dir",
             "cells.source",
-            "_derived.caliban_tracks_dir",
             "_derived.crop_ids",
             "dino.model_id",
             "dino.patch_px",

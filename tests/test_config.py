@@ -318,8 +318,9 @@ class CacheKeys(unittest.TestCase):
             ("a used feature param invalidates features downward",
              lambda c: c["features"]["params"].update(neighbor_radius_px=25),
              ["features", "fit", "outputs"]),
-            ("the caliban root does not matter to a phase run",
-             lambda c: c["paths"].update(caliban_tracks_dir="/elsewhere"), []),
+            ("the image root invalidates features downward",
+             lambda c: c["paths"].update(image_crops_dir="/elsewhere"),
+             ["features", "fit", "outputs"]),
             ("the cell source invalidates features downward",
              lambda c: c["cells"].update(source="nuclei"),
              ["features", "fit", "outputs"]),
@@ -328,22 +329,21 @@ class CacheKeys(unittest.TestCase):
             with self.subTest(label):
                 self.assertEqual(self.changed(mutate), expected)
 
-    def test_the_caliban_root_invalidates_only_the_source_that_reads_it(self):
-        """`cells.source: nuclei` is the only thing that opens that directory.
+    def test_the_image_root_invalidates_both_sources(self):
+        """It carries the nucleus tracks as well as the image, for either source.
 
-        A phase run must not notice it move, or every existing cache would be
-        orphaned by a path nothing reads.
+        There is no separate nuclei root to repoint: `nuclei_tracks.tiff` sits in
+        the crop directory beside `crop.tiff`, so moving that root moves the
+        masks of a nuclei run and the pixels of both.
         """
-        repoint = lambda c: c["paths"].update(caliban_tracks_dir="/elsewhere")  # noqa: E731
-        nuclei = copy.deepcopy(self.cfg)
-        nuclei["cells"]["source"] = "nuclei"
-        nuclei["model"]["use_dino_pcs"] = True
-        self.assertEqual(self.changed(repoint, base=nuclei),
-                         ["features", "dino", "pca", "fit", "outputs"])
-
-        phase = copy.deepcopy(self.cfg)
-        phase["model"]["use_dino_pcs"] = True
-        self.assertEqual(self.changed(repoint, base=phase), [])
+        repoint = lambda c: c["paths"].update(image_crops_dir="/elsewhere")  # noqa: E731
+        for source in ("phase", "nuclei"):
+            with self.subTest(source):
+                cfg = copy.deepcopy(self.cfg)
+                cfg["cells"]["source"] = source
+                cfg["model"]["use_dino_pcs"] = True
+                self.assertEqual(self.changed(repoint, base=cfg),
+                                 ["features", "dino", "pca", "fit", "outputs"])
 
     def test_dino_key_chain_propagates_downstream(self):
         cfg = copy.deepcopy(self.cfg)

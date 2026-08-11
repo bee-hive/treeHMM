@@ -24,14 +24,14 @@ paths:
   # Slicing a per-well registered.tiff by the crop_id coordinates lands on a
   # DIFFERENT region -- that was a real bug in an earlier pipeline, caught by
   # comparing RFP-inside-mask ratios.  Do not reintroduce it.
-  image_crops_dir: /gladstone/engelhardt/lab/MarsonLabIncucyteData/TrackingCrops/CarnevaleRepStim
-
-  # Caliban cancer-nuclei tracks, read only by cells.source: nuclei.  FLAT --
-  # one file per crop, with no per-well directory level:
-  #   {caliban_tracks_dir}/{crop_id}.tiff   (T, H, W, 1) int64
+  #
+  # The same crop directory also holds the cancer-nuclei tracks, read only by
+  # cells.source: nuclei:
+  #   {image_crops_dir}/{well}/{crop_id}/nuclei_tracks.tiff  (T, H, W) int32
   # Every non-zero label is a cancer nucleus; there is no T-cell equivalent, so
-  # a nuclei run still takes its T cells from the CVAT tracks above.
-  caliban_tracks_dir: /gladstone/engelhardt/lab/MarsonLabIncucyteData/groundTruthCalibanTracks
+  # a nuclei run still takes its T cells from the CVAT tracks above.  These
+  # supersede the flat groundTruthCalibanTracks root, whose tracks were wrong.
+  image_crops_dir: /gladstone/engelhardt/lab/MarsonLabIncucyteData/TrackingCrops/CarnevaleRepStim
 
   # Outputs.  Both are under analysis/, which is gitignored in its entirety.
   output_root: /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/treeHMM/analysis/runs

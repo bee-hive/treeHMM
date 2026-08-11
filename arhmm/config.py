@@ -375,24 +375,6 @@ def feature_params(cfg: dict) -> dict:
     return {name: params.get(name) for name in sorted(used)}
 
 
-def caliban_dir_if_read(cfg: dict) -> str | None:
-    """`paths.caliban_tracks_dir`, but only when the run actually opens it.
-
-    Returning None under `cells.source: phase` is what keeps the Caliban root out
-    of a phase run's cache key: `layout` drops a derived key that resolves to
-    None, so repointing a directory nothing reads invalidates nothing.
-
-    Args:
-        cfg (dict): resolved configuration.
-
-    Returns:
-        str | None: the directory under `cells.source: nuclei`, else None.
-    """
-    if get_path(cfg, "cells.source", None) != "nuclei":
-        return None
-    return get_path(cfg, "paths.caliban_tracks_dir", None)
-
-
 def uses_dino(cfg: dict) -> bool:
     """Whether this run feeds DINO principal components to the model."""
     return bool(get_path(cfg, "model.use_dino_pcs", False))
@@ -672,11 +654,10 @@ def validate_inputs(cfg: dict) -> list[str]:
     problems: list[str] = []
 
     # The CVAT tracks are read whatever the source: `nuclei` still takes its
-    # T cells from them.
+    # T cells from them.  The nucleus tracks come off the image root, so a
+    # nuclei run adds no root of its own -- only a file to look for.
     roots = ["ground_truth_tracks_dir", "image_crops_dir"]
     reads_nuclei = get_path(cfg, "cells.source", None) == "nuclei"
-    if reads_nuclei:
-        roots.append("caliban_tracks_dir")
     for key in roots:
         directory = Path(get_path(cfg, f"paths.{key}", "") or "")
         if not directory.is_dir():
@@ -693,10 +674,9 @@ def validate_inputs(cfg: dict) -> list[str]:
         problems.append(f"paths.repo_root does not contain models/tarhmm.py: {repo_root}")
 
     # Crops: one directory per crop, holding the tracks and the aligned image.
-    # The Caliban nuclei are the exception -- flat, one file per crop.
+    # The nucleus tracks sit in the image crop directory, beside crop.tiff.
     gt_root = Path(get_path(cfg, "paths.ground_truth_tracks_dir", "") or "")
     img_root = Path(get_path(cfg, "paths.image_crops_dir", "") or "")
-    caliban_root = Path(get_path(cfg, "paths.caliban_tracks_dir", "") or "")
     for crop in crop_ids(cfg):
         well = crop.split("_", 1)[0]
         candidates = [
@@ -705,7 +685,7 @@ def validate_inputs(cfg: dict) -> list[str]:
             img_root / well / crop / "crop.tiff",
         ]
         if reads_nuclei:
-            candidates.append(caliban_root / f"{crop}.tiff")
+            candidates.append(img_root / well / crop / "nuclei_tracks.tiff")
         for candidate in candidates:
             if not candidate.is_file():
                 problems.append(f"crop {crop}: missing {candidate}")
