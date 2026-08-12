@@ -173,6 +173,11 @@ def write_transition_matrix(fit: dict, out_dir: Path) -> list[Path]:
 # 3. feature distributions
 # --------------------------------------------------------------------------- #
 
+# The range indicators -- violin extrema bars, boxplot whiskers and caps -- are
+# drawn semi-transparent so they read as context behind the body, not as the
+# strongest mark in the panel.  The median line keeps full opacity.
+ERROR_BAR_ALPHA = 0.5
+
 
 def write_feature_distributions(cfg: dict, fit: dict, out_dir: Path) -> list[Path]:
     """Per-state distribution of every cached feature, and a summary table.
@@ -262,11 +267,15 @@ def write_feature_distributions(cfg: dict, fit: dict, out_dir: Path) -> list[Pat
             for body, colour in zip(parts["bodies"], colours):
                 body.set_facecolor(colour)
                 body.set_alpha(0.65)
+            for key in ("cbars", "cmins", "cmaxes"):
+                parts[key].set_alpha(ERROR_BAR_ALPHA)
         else:
             box = ax.boxplot(samples, positions=list(positions), patch_artist=True, widths=0.6)
             for patch, colour in zip(box["boxes"], colours):
                 patch.set_facecolor(colour)
                 patch.set_alpha(0.65)
+            for line in box["whiskers"] + box["caps"]:
+                line.set_alpha(ERROR_BAR_ALPHA)
 
         ax.set_xticks(list(positions), [str(k) for k in range(num_states)])
         ax.set_xlabel("state")
