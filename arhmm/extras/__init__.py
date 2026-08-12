@@ -4,6 +4,13 @@ Every run produces the five base outputs.  Anything beyond that is an extra:
 named in `outputs.extras`, produced into `{run}/outputs/extras/{name}/`, and
 free to fail without taking the run's real outputs down with it.
 
+A DINO run additionally gets `config.DINO_DEFAULT_EXTRAS` whether or not it
+names them, so a run cannot quietly skip the diagnostics that say whether its
+embedding is worth modelling at all.  `config.resolved_extras` is the one place
+that decides, and every reader -- validation, this step, `active_steps` and the
+step key -- goes through it, so what runs and what the key covers cannot drift
+apart.  `outputs.auto_dino_extras: false` opts out.
+
 An extra is a module in this package exposing:
 
     REQUIRES: tuple[str, ...]                      providers it needs, e.g. ("dino",)

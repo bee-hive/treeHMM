@@ -24,10 +24,16 @@ from arhmm.steps import step_main
 
 
 def _run(cfg: dict, layout, args) -> dict:
-    requested = list(cfgmod.get_path(cfg, "outputs.extras", []) or [])
+    requested = cfgmod.resolved_extras(cfg)
     if not requested:
         print("no extras requested")
         return {"requested": [], "failed": {}}
+
+    named = list(cfgmod.get_path(cfg, "outputs.extras", []) or [])
+    automatic = [name for name in requested if name not in named]
+    if automatic:
+        print(f"including {automatic} automatically: this run uses DINO "
+              f"(outputs.auto_dino_extras: false to skip)")
 
     failed: dict[str, str] = {}
     for name in requested:

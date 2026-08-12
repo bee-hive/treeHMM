@@ -243,9 +243,13 @@ class DerivedViews(unittest.TestCase):
 class CacheKeys(unittest.TestCase):
     def setUp(self):
         # Extras are pinned off rather than inherited, so these expectations do
-        # not drift when configs/_smoke.yml changes what it asks for.
+        # not drift when configs/_smoke.yml changes what it asks for.  The
+        # auto-included DINO extras are pinned off for the same reason: without
+        # this, every test here that switches DINO on would also be asserting
+        # about the extras step.  `AutoDinoExtras` below covers that on its own.
         self.cfg = C.load_config(SMOKE)
         self.cfg["outputs"]["extras"] = []
+        self.cfg["outputs"]["auto_dino_extras"] = False
 
     @staticmethod
     def keys(cfg):
@@ -402,6 +406,68 @@ class CacheKeys(unittest.TestCase):
         broken = copy.deepcopy(self.cfg)
         broken["dino"]["patch_px"] = []
         C.validate(broken)
+
+
+class AutoDinoExtras(unittest.TestCase):
+    """A DINO run produces the DINO extras whether or not it names them."""
+
+    def setUp(self):
+        self.cfg = C.load_config(SMOKE)
+        self.cfg["outputs"]["extras"] = []
+
+    def dino(self, **outputs):
+        cfg = copy.deepcopy(self.cfg)
+        cfg["model"]["use_dino_pcs"] = True
+        cfg["outputs"].update(outputs)
+        return cfg
+
+    def test_a_dino_run_gets_them_with_no_extras_named(self):
+        self.assertEqual(C.resolved_extras(self.dino()), list(C.DINO_DEFAULT_EXTRAS))
+
+    def test_a_non_dino_run_does_not(self):
+        self.assertEqual(C.resolved_extras(self.cfg), [])
+        named = copy.deepcopy(self.cfg)
+        named["outputs"]["extras"] = ["state_timeline"]
+        self.assertEqual(C.resolved_extras(named), ["state_timeline"])
+
+    def test_named_extras_keep_their_order_and_come_first(self):
+        cfg = self.dino(extras=["condition_stats", "state_timeline"])
+        self.assertEqual(C.resolved_extras(cfg),
+                         ["condition_stats", "state_timeline", *C.DINO_DEFAULT_EXTRAS])
+
+    def test_naming_one_explicitly_does_not_duplicate_it(self):
+        cfg = self.dino(extras=[C.DINO_DEFAULT_EXTRAS[0]])
+        self.assertEqual(C.resolved_extras(cfg), [C.DINO_DEFAULT_EXTRAS[0]])
+
+    def test_the_opt_out_leaves_only_what_was_named(self):
+        cfg = self.dino(extras=["state_timeline"], auto_dino_extras=False)
+        self.assertEqual(C.resolved_extras(cfg), ["state_timeline"])
+
+    def test_they_activate_the_extras_step_on_their_own(self):
+        """`outputs.extras: []` no longer means "no extras step" for a DINO run."""
+        self.assertNotIn("extras", [s.name for s in L.active_steps(self.cfg)])
+        self.assertIn("extras", [s.name for s in L.active_steps(self.dino())])
+        self.assertNotIn(
+            "extras",
+            [s.name for s in L.active_steps(self.dino(auto_dino_extras=False))],
+        )
+
+    def test_the_step_key_covers_what_actually_runs(self):
+        """Two runs differing only in the opt-out must not share an extras key."""
+        on = self.dino(extras=["state_timeline"])
+        off = self.dino(extras=["state_timeline"], auto_dino_extras=False)
+        self.assertNotEqual(L.step_key(on, "extras"), L.step_key(off, "extras"))
+
+    def test_auto_included_extras_are_validated_like_named_ones(self):
+        """Every default must be a real extra whose requirements a DINO run meets."""
+        from arhmm.extras import EXTRA_NAMES, requirements_for
+
+        for name in C.DINO_DEFAULT_EXTRAS:
+            with self.subTest(name=name):
+                self.assertIn(name, EXTRA_NAMES)
+                self.assertIn("dino", requirements_for(name))
+        C.validate(self.dino())          # must not raise
+        C.validate(self.cfg)             # nor the non-DINO case
 
 
 if __name__ == "__main__":

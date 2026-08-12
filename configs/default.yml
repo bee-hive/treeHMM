@@ -172,3 +172,15 @@ outputs:
 
   # opt-in extra outputs, discovered by filename under arhmm/extras/
   extras: []                             # [condition_stats, dino_confounds, state_timeline]
+
+  # a DINO run also gets dino_step_distance whether or not `extras` names it:
+  # whether the embedding tracks the cell or the per-frame noise is not an
+  # optional question about a DINO run.  Set false to run only what is named.
+  auto_dino_extras: true                 # [true, false]
+
+  # settings for the dino_step_distance extra; like every extra's settings these
+  # are NOT in any cache key, so changing one needs `--force` on extras
+  dino_step_distance:
+    # how two embeddings are compared; cosine ignores vector magnitude, which
+    # matters here because averaging over patch sizes shrinks the norms
+    metric: cosine                       # [cosine, euclidean]

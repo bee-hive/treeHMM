@@ -36,7 +36,15 @@ because no single environment has JAX, torch and scikit-image together.
 | `extras` | `OccidentAnalysis` | opt-in extra outputs | run-local, optional |
 
 `dino` and `pca` are skipped unless `model.use_dino_pcs` is true; `extras` is
-skipped unless `outputs.extras` is non-empty.
+skipped unless there is an extra to run.
+
+A DINO run always runs `dino_step_distance`, whether or not `outputs.extras`
+names it -- so `extras` is active for a DINO run even with `outputs.extras: []`.
+Whether the embedding tracks the cell or the per-frame noise decides whether any
+of the states mean anything, and that is not a question a run should be able to
+skip by omission. `config.resolved_extras` is the single place that decides, so
+the step key covers what actually runs; `outputs.auto_dino_extras: false` opts
+out.
 
 `dino.patch_px` is a list of patch sizes and defaults to one, `[50]`; a bare int
 still works and hashes identically. Given several, the cell is cut and embedded

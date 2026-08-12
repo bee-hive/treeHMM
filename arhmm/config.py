@@ -62,6 +62,14 @@ PATCH_OVERLAYS = ("rfp", "masks", "none")
 AGE_HISTOGRAM_KINDS = ("stacked", "grouped", "step")
 AGE_ANCHORS = ("existence", "inferred")
 
+#: Extras added to every DINO run whether or not `outputs.extras` names them.
+#: These answer a question you cannot skip about a DINO run and still trust it:
+#: `dino_step_distance` shows whether the embedding tracks the cell or the
+#: per-frame noise, and a run whose raster is uniformly bright has no
+#: behavioural signal to model, no matter what the states look like.  Set
+#: `outputs.auto_dino_extras: false` to run only what the config names.
+DINO_DEFAULT_EXTRAS = ("dino_step_distance",)
+
 
 class ConfigError(Exception):
     """A configuration is malformed, contradictory, or names something unknown."""
@@ -387,6 +395,29 @@ def dino_column_names(cfg: dict) -> list[str]:
     return [f"dino_pc_{i}" for i in range(int(get_path(cfg, "dino.n_pcs")))]
 
 
+def resolved_extras(cfg: dict) -> list[str]:
+    """The extras this run actually produces, in the order they run.
+
+    What `outputs.extras` names, followed by any `DINO_DEFAULT_EXTRAS` the run
+    qualifies for and did not already name.  Auto-included extras come last so
+    that an explicit list still controls the order of everything in it.
+
+    Every reader of `outputs.extras` goes through here -- validation, the extras
+    step, `active_steps` and the step key -- so a run cannot produce an extra
+    its key does not cover.
+
+    Args:
+        cfg (dict): resolved configuration.
+
+    Returns:
+        list[str]: extra names.
+    """
+    named = list(get_path(cfg, "outputs.extras", []) or [])
+    if not uses_dino(cfg) or not get_path(cfg, "outputs.auto_dino_extras", True):
+        return named
+    return named + [name for name in DINO_DEFAULT_EXTRAS if name not in named]
+
+
 def dino_patch_sizes(cfg: dict) -> list[int]:
     """The patch edge lengths to embed, sorted and de-duplicated.
 
@@ -671,9 +702,13 @@ def validate(cfg: dict) -> None:
             f"outputs.state_age_histogram.anchor must be one of {AGE_ANCHORS}, got {anchor!r}"
         )
 
-    extras = get_path(cfg, "outputs.extras", []) or []
-    if not isinstance(extras, list):
+    named = get_path(cfg, "outputs.extras", []) or []
+    if not isinstance(named, list):
         raise ConfigError("outputs.extras must be a list")
+    # The resolved list, so an auto-included extra is validated exactly as a
+    # named one is -- it is the same work either way, and a broken default
+    # should fail here rather than halfway through the extras step.
+    extras = resolved_extras(cfg)
     # Imported lazily: `extras/__init__.py` only needs to be importable in the
     # environment that actually runs the extras step.
     from arhmm.extras import EXTRA_NAMES, requirements_for

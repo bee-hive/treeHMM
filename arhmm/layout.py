@@ -82,6 +82,10 @@ _DERIVED = {
     # before the key learned to be a list.  Renaming it would orphan every
     # existing DINO cache to buy nothing.
     "dino.patch_px": cfgmod.dino_patch_key,
+    # Likewise named for the config key it normalizes: the extras a run produces
+    # are `outputs.extras` plus whatever a DINO run gets automatically, and the
+    # key has to cover what actually ran, not what was typed.
+    "outputs.extras": cfgmod.resolved_extras,
 }
 
 
@@ -194,7 +198,7 @@ def active_steps(cfg: dict) -> list[Step]:
         list[Step]: steps to execute, in dependency order.
     """
     use_dino = cfgmod.uses_dino(cfg)
-    wants_extras = bool(cfgmod.get_path(cfg, "outputs.extras", []) or [])
+    wants_extras = bool(cfgmod.resolved_extras(cfg))
     steps = []
     for step in STEPS:
         if step.name in ("dino", "pca") and not use_dino:

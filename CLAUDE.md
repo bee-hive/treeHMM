@@ -33,7 +33,7 @@ See `README.md` for the full probabilistic model and `Derivation/` for the forwa
 | `extras` | imaging | `OccidentAnalysis` | opt-in extras (run-local, optional) |
 
 `dino`/`pca` are dropped from the chain entirely unless `model.use_dino_pcs: true`; `extras` is
-dropped when `outputs.extras` is empty.
+dropped when there is no extra to run.
 
 `dino.patch_px` is a **list** of patch sizes, and defaults to one (`[50]`); a bare int is still
 accepted. Naming several (`[30, 50, 70]`) embeds the cell once per size and **averages the
