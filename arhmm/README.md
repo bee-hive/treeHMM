@@ -236,6 +236,8 @@ analysis/runs/<run_name>/
   outputs/
     overlays/<crop>_state_overlay.mp4        cancer cells tinted by state
     feature_distributions.png                every cached feature, per state
+    feature_distributions_dino.png           each DINO component, per state
+                                             (DINO runs only)
     state_feature_summary.csv
     state_age_histogram.png / .csv           state occupancy binned by cell age
     transition_matrix.csv / .png
