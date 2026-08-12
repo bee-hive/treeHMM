@@ -651,12 +651,17 @@ def write_overlay_videos(cfg: dict, fit: dict, out_dir: Path) -> list[Path]:
 
         legend = [mpatches.Patch(color=colours[k], label=f"state {k}") for k in range(num_states)]
         legend.append(mpatches.Patch(color=(0.5, 0.5, 0.5), label="no state inferred"))
+        # A column per 20 entries: one column costs the image a fixed slice of
+        # width whatever k is, and 20 rows still fit the height of the default
+        # 7 in figure.  Only an implausibly large k reaches a second column.
+        legend_cols = 1 + (len(legend) - 1) // 20
 
         # Everything the closure needs is bound as a default argument:
         # frames_to_mp4 calls it lazily, so a closure over `crop_id` would
         # render the last crop into every video.
         def draw(t, _phase=phase, _tcells=tcells, _cancer=crop.cancer, _ids=cell_ids,
-                 _states=states, _active=active, _crop=crop_id, _legend=legend):
+                 _states=states, _active=active, _crop=crop_id, _legend=legend,
+                 _legend_cols=legend_cols):
             ax = plt.gca()
             ax.imshow(_phase[t], cmap="gray", vmin=0.0, vmax=1.0)
             ax.imshow(
@@ -679,11 +684,18 @@ def write_overlay_videos(cfg: dict, fit: dict, out_dir: Path) -> list[Path]:
                 fontsize=8,
             )
             ax.axis("off")
-            # Outside the axes: an in-frame legend sits on top of whichever
-            # cells happen to be in that corner.
+            # Outside the axes, and in a *column* at the right: an in-frame
+            # legend sits on top of whichever cells happen to be in that
+            # corner, and a single row underneath grows with k until it is
+            # wider than the figure -- constrained layout then pays for the
+            # row by shrinking the image to a thumbnail, which is what k=10
+            # used to render as.  A column is as wide as one label whatever k
+            # is, so the image keeps the rest of the figure.
             ax.legend(
-                handles=_legend, loc="upper center", bbox_to_anchor=(0.5, -0.02),
-                ncol=len(_legend), frameon=False,
+                handles=_legend, loc="center left", bbox_to_anchor=(1.01, 0.5),
+                ncol=_legend_cols, frameon=False, fontsize=8,
+                handlelength=1.2, handletextpad=0.6, labelspacing=0.7,
+                borderaxespad=0.0,
             )
 
         path = viz.frames_to_mp4(
