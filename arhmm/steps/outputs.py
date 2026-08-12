@@ -3,6 +3,7 @@
     overlays/{crop}_state_overlay.mp4   each cancer cell tinted by its inferred
                                         state, over the phase image
     feature_distributions.png           distribution of every computed value
+    feature_distributions_dino.png      the same, per DINO component (DINO runs)
     state_feature_summary.csv           within each state, derived features too
     state_age_histogram.png             state occupancy against cell age
     state_age_histogram.csv
@@ -17,6 +18,10 @@ tautology; the diagnostic features are what make the description checkable, so
 the figure marks which is which.  The figure plots actual values -- the `d_*`
 differences and `win_std_*` spreads are `derived` in the registry and go to the
 CSV only, unless the model was fit on one.
+
+A run that feeds DINO components to the model gets the same figure again for
+those components, as `feature_distributions_dino.png`.  The track features alone
+cannot describe a state the appearance embedding is what separated.
 
 Run inside the imaging environment.
 """
@@ -178,6 +183,50 @@ def write_transition_matrix(fit: dict, out_dir: Path) -> list[Path]:
 # strongest mark in the panel.  The median line keeps full opacity.
 ERROR_BAR_ALPHA = 0.5
 
+#: Spine colour marking a panel whose quantity the model was fit on.
+EMISSION_SPINE = "#c44e52"
+
+
+def _draw_state_panel(ax, samples: list[np.ndarray], colours, kind: str) -> None:
+    """Draw one per-state distribution panel, violin or box.
+
+    Shared by both distribution figures so the two read as one figure split in
+    half: same mark, same alpha, same fallback when a state is too sparse to
+    estimate a density from.
+
+    Args:
+        ax: matplotlib axes.
+        samples (list[np.ndarray]): finite values per state, in state order.
+        colours: one colour per state.
+        kind (str): `violin`, or anything else for a boxplot.
+    """
+    positions = list(range(1, len(samples) + 1))
+    if kind == "violin" and all(s.size > 1 for s in samples):
+        parts = ax.violinplot(samples, positions=positions, showmedians=True)
+        for body, colour in zip(parts["bodies"], colours):
+            body.set_facecolor(colour)
+            body.set_alpha(0.65)
+        for key in ("cbars", "cmins", "cmaxes"):
+            parts[key].set_alpha(ERROR_BAR_ALPHA)
+    else:
+        box = ax.boxplot(samples, positions=positions, patch_artist=True, widths=0.6)
+        for patch, colour in zip(box["boxes"], colours):
+            patch.set_facecolor(colour)
+            patch.set_alpha(0.65)
+        for line in box["whiskers"] + box["caps"]:
+            line.set_alpha(ERROR_BAR_ALPHA)
+
+    ax.set_xticks(positions, [str(k) for k in range(len(samples))])
+    ax.set_xlabel("state")
+
+
+def _mark_emission(ax) -> None:
+    """Outline a panel to mark that the model was fit on this quantity."""
+    for spine in ax.spines.values():
+        spine.set_visible(True)
+        spine.set_color(EMISSION_SPINE)
+        spine.set_linewidth(1.6)
+
 
 def write_feature_distributions(cfg: dict, fit: dict, out_dir: Path) -> list[Path]:
     """Per-state distribution of every cached feature, and a summary table.
@@ -261,34 +310,13 @@ def write_feature_distributions(cfg: dict, fit: dict, out_dir: Path) -> list[Pat
             sample = values[..., index][active & (states == k)]
             samples.append(sample[np.isfinite(sample)])
 
-        positions = range(1, num_states + 1)
-        if kind == "violin" and all(s.size > 1 for s in samples):
-            parts = ax.violinplot(samples, positions=positions, showmedians=True)
-            for body, colour in zip(parts["bodies"], colours):
-                body.set_facecolor(colour)
-                body.set_alpha(0.65)
-            for key in ("cbars", "cmins", "cmaxes"):
-                parts[key].set_alpha(ERROR_BAR_ALPHA)
-        else:
-            box = ax.boxplot(samples, positions=list(positions), patch_artist=True, widths=0.6)
-            for patch, colour in zip(box["boxes"], colours):
-                patch.set_facecolor(colour)
-                patch.set_alpha(0.65)
-            for line in box["whiskers"] + box["caps"]:
-                line.set_alpha(ERROR_BAR_ALPHA)
-
-        ax.set_xticks(list(positions), [str(k) for k in range(num_states)])
-        ax.set_xlabel("state")
+        _draw_state_panel(ax, samples, colours, kind)
         ax.set_title(name, color="black" if name in seen else "0.35")
         # Units, not the description: a truncated sentence on a y-axis reads as
         # a bug.  The full description lives in the features cache's meta.json.
         ax.set_ylabel(units.get(name, ""))
         if name in seen:
-            # A visible frame marks the features the model was actually fit on.
-            for spine in ax.spines.values():
-                spine.set_visible(True)
-                spine.set_color("#c44e52")
-                spine.set_linewidth(1.6)
+            _mark_emission(ax)
 
     for panel in range(len(plotted), len(flat)):
         flat[panel].axis("off")
@@ -306,6 +334,134 @@ def write_feature_distributions(cfg: dict, fit: dict, out_dir: Path) -> list[Pat
     figure.savefig(png_path, dpi=160, bbox_inches="tight", facecolor="white")
     plt.close(figure)
     return [csv_path, png_path]
+
+
+def _explained_variance(layout) -> np.ndarray | None:
+    """The PCA's explained variance ratio per component, if the cache is there.
+
+    Read straight from the `pca` cache rather than recomputed: it is the one
+    number that says whether a component the states differ on is a direction the
+    embeddings actually vary along.  A missing or unreadable cache costs the
+    subtitles and nothing else, so it is not worth failing the outputs step over.
+    """
+    try:
+        arrays = io.load_npz(layout.step_dir("pca") / "pca_model.npz")
+        return np.asarray(arrays["explained_variance_ratio"], dtype=float)
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def dino_component_values(fit: dict) -> tuple[list[str], np.ndarray]:
+    """The DINO components the model saw, back in PC-score units.
+
+    `emissions.npy` holds the emission tensor after the fit's optional
+    standardization, so plotting it directly would put z-scores on an axis whose
+    sibling figure carries actual values.  The fit records the mean and standard
+    deviation it divided by, so the transform is exactly invertible.
+
+    Args:
+        fit (dict): loaded fit artifacts.
+
+    Returns:
+        tuple: the DINO column names in emission order, and a `(T, C, k)` array
+            of their values.  Both are empty when the run fed the model no
+            DINO components.
+    """
+    names = list(fit["summary"]["emission_names"])
+    dims = [d for d, name in enumerate(names) if name.startswith("dino_pc_")]
+    if not dims:
+        return [], np.empty(fit["emissions"].shape[:2] + (0,), dtype=np.float32)
+
+    values = fit["emissions"][..., dims].astype(np.float32)
+    standardization = fit["summary"].get("standardization")
+    if standardization:
+        mean = np.asarray(standardization["mean"], dtype=np.float32)[dims]
+        std = np.asarray(standardization["std"], dtype=np.float32)[dims]
+        values = values * std + mean
+    return [names[d] for d in dims], values
+
+
+def write_dino_distributions(cfg: dict, fit: dict, layout, out_dir: Path) -> list[Path]:
+    """Per-state distribution of each DINO principal component the model saw.
+
+    The sibling of `feature_distributions.png` for the appearance half of the
+    emission vector.  Without it a DINO run's states are described entirely by
+    the track features, which are exactly the dimensions the DINO components
+    were added to go beyond -- so a state that exists only because of appearance
+    has nothing in the outputs to characterise it.
+
+    The values are the components **as the model saw them**, taken from
+    `emissions.npy` and un-standardized back to PC score when `model.standardize`
+    was on, so the panels show actual component values the way
+    `feature_distributions.png` shows actual feature values.  Every panel is
+    outlined, since every component here is an emission; that keeps "outlined =
+    fed to the model" meaning the same thing in both figures.
+
+    Args:
+        cfg (dict): resolved configuration.
+        fit (dict): loaded fit artifacts.
+        layout (Layout): the run's layout, for the PCA cache.
+        out_dir (Path): output directory.
+
+    Returns:
+        list[Path]: the written figure, or nothing when the run has no
+            DINO components.
+    """
+    summary = fit["summary"]
+    columns, values = dino_component_values(fit)
+    if not columns:
+        return []
+
+    states = fit["state_assignments"]
+    active = fit["active_mask"]
+    num_states = summary["num_states"]
+    colours = viz.state_colours(num_states)
+    kind = cfgmod.get_path(cfg, "outputs.feature_distributions.kind", "violin")
+    max_cols = int(cfgmod.get_path(cfg, "outputs.feature_distributions.max_cols", 4))
+
+    ratios = _explained_variance(layout)
+    whitened = bool(cfgmod.get_path(cfg, "dino.whiten", True))
+
+    viz.apply_style()
+    rows, cols = viz.grid_shape(len(columns), max_cols)
+    figure, axes = plt.subplots(rows, cols, figsize=(3.2 * cols, 2.8 * rows), squeeze=False)
+    flat = axes.ravel()
+
+    for panel, name in enumerate(columns):
+        ax = flat[panel]
+        samples = []
+        for k in range(num_states):
+            sample = values[..., panel][active & (states == k)]
+            samples.append(sample[np.isfinite(sample)])
+
+        _draw_state_panel(ax, samples, colours, kind)
+        title = name
+        # The component index is its own position in the PCA basis, so it
+        # indexes the explained-variance vector directly.
+        index = int(name.rsplit("_", 1)[-1])
+        if ratios is not None and index < ratios.size:
+            title += f"  ({100 * ratios[index]:.1f}% var)"
+        ax.set_title(title)
+        ax.set_ylabel("a.u.")
+        _mark_emission(ax)
+
+    for panel in range(len(columns), len(flat)):
+        flat[panel].axis("off")
+
+    patches = "/".join(str(s) for s in cfgmod.dino_patch_sizes(cfg))
+    subtitle = f"{'whitened ' if whitened else ''}components of "
+    subtitle += f"{cfgmod.get_path(cfg, 'dino.model_id', 'dinov2')} on {patches}px patches"
+    if summary.get("standardization"):
+        subtitle += "; PC scores, un-standardized"
+    figure.suptitle(
+        f"{summary['run_name']}: DINO component distributions per state ({subtitle})",
+        fontsize=10,
+    )
+    figure.tight_layout(rect=(0, 0, 1, 0.97))
+    png_path = out_dir / "feature_distributions_dino.png"
+    figure.savefig(png_path, dpi=160, bbox_inches="tight", facecolor="white")
+    plt.close(figure)
+    return [png_path]
 
 
 # --------------------------------------------------------------------------- #
@@ -716,6 +872,7 @@ def _run(cfg: dict, layout, args) -> dict:
     written += write_state_assignments(fit, out_dir)
     written += write_transition_matrix(fit, out_dir)
     written += write_feature_distributions(cfg, fit, out_dir)
+    written += write_dino_distributions(cfg, fit, layout, out_dir)
     written += write_state_age_histogram(cfg, fit, layout, out_dir)
     written += write_overlay_videos(cfg, fit, io.ensure_dir(layout.overlays_dir))
 

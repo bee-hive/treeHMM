@@ -461,5 +461,12 @@ def declared_outputs(name: str, cfg: dict) -> Iterable[str]:
     if name == "fit":
         return ["fit_summary.yml", "state_assignments.npy"]
     if name == "outputs":
-        return ["state_assignments.csv", "transition_matrix.csv", "state_age_histogram.csv"]
+        produced = ["state_assignments.csv", "transition_matrix.csv", "state_age_histogram.csv"]
+        # Declared rather than covered by a version bump: only DINO runs gain
+        # this figure, and only they should be re-rendered for it.  A run that
+        # predates it is marked stale by the missing file alone, which leaves
+        # every non-DINO run's overlay videos where they are.
+        if cfgmod.uses_dino(cfg):
+            produced.append("feature_distributions_dino.png")
+        return produced
     return []
