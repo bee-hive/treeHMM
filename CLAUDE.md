@@ -35,6 +35,12 @@ See `README.md` for the full probabilistic model and `Derivation/` for the forwa
 `dino`/`pca` are dropped from the chain entirely unless `model.use_dino_pcs: true`; `extras` is
 dropped when `outputs.extras` is empty.
 
+`dino.patch_px` is a **list** of patch sizes, and defaults to one (`[50]`); a bare int is still
+accepted. Naming several (`[30, 50, 70]`) embeds the cell once per size and **averages the
+embeddings inside the `dino` step**, before PCA — so one multi-scale vector leaves it in the same
+shape one size gives, and nothing downstream changes. `50` and `[50]` hash identically, so
+switching to list form orphaned no cache.
+
 Cached steps are content-addressed under `analysis/cache/<step>/<key>/` and shared across
 runs, so a sweep over `model.*` recomputes only `fit` onward.
 

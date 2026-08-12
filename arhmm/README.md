@@ -38,6 +38,15 @@ because no single environment has JAX, torch and scikit-image together.
 `dino` and `pca` are skipped unless `model.use_dino_pcs` is true; `extras` is
 skipped unless `outputs.extras` is non-empty.
 
+`dino.patch_px` is a list of patch sizes and defaults to one, `[50]`; a bare int
+still works and hashes identically. Given several, the cell is cut and embedded
+once per size and the embeddings are **averaged inside the `dino` step**, so one
+multi-scale vector per cell-frame leaves it in the same `(T, N, E)` shape a
+single size gives -- `pca`, the DINO provider and `fit` never learn that
+multi-scale exists. Because `50` and `[50]` hash the same, neither adding the
+feature nor rewriting the configs in list form orphaned any cache. The cost is
+linear: three sizes is three forward passes over every cell-frame.
+
 Every step is independently runnable, which is how you debug one environment at
 a time:
 

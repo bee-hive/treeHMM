@@ -14,6 +14,7 @@ lazily there -- these run in all three conda environments.
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -27,7 +28,8 @@ PARAMS = dict(
     other_cancer_colour=[0.0, 0.0, 1.0],
     tcell_colour=[0.0, 1.0, 0.0],
     rfp_alpha=0.3,
-    patch_px=50,
+    # no patch_px: the size is passed explicitly to iter_patches and
+    # subject_patch, because dino.patch_px may name several of them.
 )
 
 
@@ -197,6 +199,71 @@ class OverlayModes(unittest.TestCase):
                                 params["subject_colour"], D.effective_mask_alpha(params))
         self.assertEqual(patch.min(), patch.max(), "something was painted over the phase")
         self.assertEqual(int(patch[50, 50, 0]), 127)   # the 0.5 background, as uint8
+
+
+class MultiScaleIteration(unittest.TestCase):
+    """The invariant the multi-scale average rests on.
+
+    `steps.dino` embeds each size separately and adds the results into one
+    array, which is only meaningful if every size yields the same cell-frames in
+    the same order.  That holds because `iter_patches` skips on activity, on the
+    centroid and on the mask -- never on the size -- and this is what pins it.
+    """
+
+    def crop(self):
+        phase, cancer, tcells = scene([(4, (20, 30, 20, 30)), (9, (60, 70, 100, 110))])
+        num_frames = 3
+        image = np.zeros((num_frames, 150, 150, 2), np.float32)
+        image[..., 1] = phase
+        return SimpleNamespace(
+            num_frames=num_frames,
+            cell_ids=np.array([4, 9], np.int32),
+            image=image,
+            cancer=np.repeat(cancer[None], num_frames, axis=0),
+            tcells=np.repeat(tcells[None], num_frames, axis=0),
+        )
+
+    def setUp(self):
+        self.centroids = np.zeros((3, 2, 2), np.float32)
+        self.centroids[:, 0] = (24.5, 24.5)
+        self.centroids[:, 1] = (64.5, 104.5)
+        self.active = np.ones((3, 2), bool)
+        # One absent cell-frame and one that is active but has no centroid --
+        # the two ways a cell-frame drops out, both size-independent.
+        self.active[1, 0] = False
+        self.centroids[2, 1] = np.nan
+
+    def index_at(self, patch_px):
+        crop = self.crop()
+        return [(t, column) for t, column, _ in
+                D.iter_patches(crop, self.centroids, self.active, PARAMS, patch_px)]
+
+    def test_every_size_yields_the_same_cell_frames(self):
+        expected = [(0, 0), (0, 1), (1, 1), (2, 0)]
+        for patch_px in (16, 30, 50, 101):
+            with self.subTest(patch_px=patch_px):
+                self.assertEqual(self.index_at(patch_px), expected)
+
+    def test_the_size_argument_sets_the_patch_shape(self):
+        crop = self.crop()
+        for patch_px in (16, 30, 50, 101):
+            with self.subTest(patch_px=patch_px):
+                _, _, patch = next(
+                    D.iter_patches(crop, self.centroids, self.active, PARAMS, patch_px)
+                )
+                self.assertEqual(patch.shape, (patch_px, patch_px, 3))
+
+    def test_the_subject_stays_centred_at_every_size(self):
+        crop = self.crop()
+        for patch_px in (30, 50, 100):
+            with self.subTest(patch_px=patch_px):
+                _, _, patch = next(
+                    D.iter_patches(crop, self.centroids, self.active, PARAMS, patch_px)
+                )
+                ys, xs = np.nonzero(redness(patch))
+                centre = (patch_px - 1) / 2
+                self.assertAlmostEqual(ys.mean(), centre, delta=1.0)
+                self.assertAlmostEqual(xs.mean(), centre, delta=1.0)
 
 
 class ModelSourceResolution(unittest.TestCase):

@@ -358,6 +358,51 @@ class CacheKeys(unittest.TestCase):
         cfg["model"]["use_dino_pcs"] = True
         self.assertEqual(self.changed(lambda c: c["dino"].update(batch_size=8), base=cfg), [])
 
+    def test_a_single_patch_size_hashes_the_same_scalar_or_list(self):
+        """The guarantee that multi-scale support orphans no existing cache.
+
+        `dino.patch_px` is normalized through `_DERIVED` under its own name, so
+        a one-size run must hash exactly as it did when the key could only be a
+        scalar.  If this breaks, every cached DINO embedding is recomputed.
+        """
+        cfg = copy.deepcopy(self.cfg)
+        cfg["model"]["use_dino_pcs"] = True
+        self.assertEqual(self.changed(lambda c: c["dino"].update(patch_px=[50]), base=cfg), [])
+
+    def test_patch_size_order_and_repeats_do_not_move_the_key(self):
+        cfg = copy.deepcopy(self.cfg)
+        cfg["model"]["use_dino_pcs"] = True
+        cfg["dino"]["patch_px"] = [30, 50, 70]
+        for equivalent in ([70, 50, 30], [50, 30, 70, 50]):
+            with self.subTest(equivalent=equivalent):
+                self.assertEqual(
+                    self.changed(lambda c: c["dino"].update(patch_px=equivalent), base=cfg), []
+                )
+
+    def test_adding_a_patch_size_invalidates_dino_downward(self):
+        cfg = copy.deepcopy(self.cfg)
+        cfg["model"]["use_dino_pcs"] = True
+        self.assertEqual(
+            self.changed(lambda c: c["dino"].update(patch_px=[30, 50]), base=cfg),
+            ["dino", "pca", "fit", "outputs"],
+        )
+
+    def test_unusable_patch_sizes_are_rejected(self):
+        cfg = copy.deepcopy(self.cfg)
+        cfg["model"]["use_dino_pcs"] = True
+        for bad in ([], 0, -5, [30, 0], ["50"], [30.0], True):
+            with self.subTest(bad=bad):
+                broken = copy.deepcopy(cfg)
+                broken["dino"]["patch_px"] = bad
+                with self.assertRaises(C.ConfigError):
+                    C.validate(broken)
+
+    def test_patch_sizes_are_not_checked_when_dino_is_off(self):
+        """Consistent with the rest of the `dino` block, which is only read when used."""
+        broken = copy.deepcopy(self.cfg)
+        broken["dino"]["patch_px"] = []
+        C.validate(broken)
+
 
 if __name__ == "__main__":
     unittest.main()

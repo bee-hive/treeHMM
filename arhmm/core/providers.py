@@ -116,9 +116,12 @@ def _dino_load(cfg: dict, layout, crop_id: str) -> tuple[np.ndarray, list[str]]:
 def _dino_describe(column: str, cfg: dict) -> str:
     index = int(column.rsplit("_", 1)[-1])
     model_id = cfgmod.get_path(cfg, "dino.model_id", "dinov2")
-    patch = cfgmod.get_path(cfg, "dino.patch_px", "?")
+    sizes = cfgmod.dino_patch_sizes(cfg)
+    patch = "/".join(str(s) for s in sizes)
+    averaged = " averaged over sizes" if len(sizes) > 1 else ""
     whitened = "whitened " if cfgmod.get_path(cfg, "dino.whiten", True) else ""
-    return f"{whitened}principal component {index} of {model_id} on {patch}px centroid patches"
+    return (f"{whitened}principal component {index} of {model_id} on "
+            f"{patch}px centroid patches{averaged}")
 
 
 DINO = Provider(

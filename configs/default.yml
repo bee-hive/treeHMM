@@ -56,8 +56,12 @@ dino:
   # local snapshot dir loaded with local_files_only; not in the cache key
   model_path: /gladstone/engelhardt/home/jadjasu/.cache/huggingface/hub/models--facebook--dinov2-base
 
-  # side length of the square patch cut around the rounded centroid, edge-padded
-  patch_px: 50                           # int > 0, px
+  # side lengths of the square patches cut around the rounded centroid,
+  # edge-padded; NAMING SEVERAL embeds the cell once per size and averages the
+  # embeddings before PCA, giving one multi-scale vector rather than forcing a
+  # choice between a close crop and its context
+  # one size is the default, and [50] hashes exactly as a bare 50 always did
+  patch_px: [50]                         # list of int > 0 (a bare int is fine), px
 
   # how many principal components of the embedding are fed to the model
   n_pcs: 10                              # int >= 1

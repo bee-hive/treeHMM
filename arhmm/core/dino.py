@@ -42,6 +42,14 @@ the hard way:
 The patch is a fixed `patch_px` window around the rounded centroid, taken from
 an edge-padded image.  Padding first means every cell gets a full-size window
 with no bounds checks and no variable-size patches near the frame edge.
+
+`dino.patch_px` may name **several** sizes, in which case the cell is cut and
+embedded once per size and the embeddings are averaged, before PCA, into one
+multi-scale vector.  The window is the only thing that changes: the processor
+resizes every patch to the model's input resolution regardless, so a small
+window is a close crop and a large one is the same cell with more context.
+Averaging is what stops the choice between the two from being a fork in the
+experiment -- see `configs/runs/dino_focus/_base.yml` for what that fork costs.
 """
 
 from __future__ import annotations
@@ -246,19 +254,29 @@ def iter_patches(
     centroids: np.ndarray,
     active: np.ndarray,
     params: dict,
+    patch_px: int,
 ) -> Iterator[tuple[int, int, np.ndarray]]:
     """Yield `(frame, column, patch)` for every observed cell-frame in a crop.
+
+    Which cell-frames are yielded does **not** depend on `patch_px` -- a
+    cell-frame is skipped only when it is inactive, its centroid is not finite,
+    or its label mask is empty.  So calling this at several sizes gives the same
+    `(frame, column)` sequence each time, which is what lets the step average
+    across sizes without tracking per-size coverage.
 
     Args:
         crop (CropCells): the loaded crop, with its image.
         centroids (np.ndarray): `(T, N, 2)` crop-local centroids, NaN where absent.
         active (np.ndarray): `(T, N)` bool.
         params (dict): the config's `dino` block.
+        patch_px (int): edge length of the square window, passed explicitly
+            rather than read from `params` because `dino.patch_px` may name
+            several sizes.
 
     Yields:
         tuple[int, int, np.ndarray]: frame index, column index, `(P, P, 3)` uint8.
     """
-    patch_px = int(params["patch_px"])
+    patch_px = int(patch_px)
     mask_alpha = effective_mask_alpha(params)
     subject_colour = params["subject_colour"]
 

@@ -76,6 +76,12 @@ _DERIVED = {
     "_derived.computed_features": cfgmod.computed_features,
     "_derived.feature_params": cfgmod.feature_params,
     "_derived.emission_names": cfgmod.emission_names,
+    # The one entry named for a real config key rather than `_derived.*`, and
+    # deliberately so: the payload is keyed by the string itself, so normalizing
+    # under `dino.patch_px` leaves a single-size run hashing exactly as it did
+    # before the key learned to be a list.  Renaming it would orphan every
+    # existing DINO cache to buy nothing.
+    "dino.patch_px": cfgmod.dino_patch_key,
 }
 
 

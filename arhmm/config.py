@@ -387,6 +387,54 @@ def dino_column_names(cfg: dict) -> list[str]:
     return [f"dino_pc_{i}" for i in range(int(get_path(cfg, "dino.n_pcs")))]
 
 
+def dino_patch_sizes(cfg: dict) -> list[int]:
+    """The patch edge lengths to embed, sorted and de-duplicated.
+
+    `dino.patch_px` accepts a single int or a list of them.  Given several, the
+    `dino` step embeds the cell at each size and averages the embeddings, so the
+    model sees one multi-scale appearance vector rather than one scale's.
+
+    Args:
+        cfg (dict): resolved configuration.
+
+    Returns:
+        list[int]: patch sizes in ascending order.
+
+    Raises:
+        ConfigError: the value is empty, or is not an int / list of positive ints.
+    """
+    value = get_path(cfg, "dino.patch_px", None)
+    raw = value if isinstance(value, (list, tuple)) else [value]
+    if not raw:
+        raise ConfigError("dino.patch_px must name at least one patch size")
+    sizes = []
+    for item in raw:
+        # bool is an int subclass, and `patch_px: true` is never meant.
+        if not isinstance(item, int) or isinstance(item, bool) or item < 1:
+            raise ConfigError(
+                f"dino.patch_px must be an int > 0 or a list of them, got {value!r}"
+            )
+        sizes.append(int(item))
+    return sorted(set(sizes))
+
+
+def dino_patch_key(cfg: dict) -> int | list[int]:
+    """`dino.patch_px` normalized for hashing: a bare int for a single size.
+
+    Keeping the scalar form is what lets a one-size run hash exactly as it did
+    before `patch_px` learned to be a list, so no existing cache is orphaned.
+    See the `_DERIVED` comment in `layout`.
+
+    Args:
+        cfg (dict): resolved configuration.
+
+    Returns:
+        int | list[int]: the size itself, or the sorted list of them.
+    """
+    sizes = dino_patch_sizes(cfg)
+    return sizes[0] if len(sizes) == 1 else sizes
+
+
 def emission_names(cfg: dict) -> list[str]:
     """Names of the emission dimensions, in the order the model sees them.
 
@@ -549,6 +597,7 @@ def validate(cfg: dict) -> None:
             raise ConfigError(f"model.use_dino_pcs is set, so dino.n_pcs must be >= 1 (got {n_pcs!r})")
         if not get_path(cfg, "dino.model_path", None):
             raise ConfigError("model.use_dino_pcs is set, so dino.model_path must be given")
+        dino_patch_sizes(cfg)   # raises if the sizes are not usable
         overlay = get_path(cfg, "dino.patch_overlay", "none")
         if overlay not in PATCH_OVERLAYS:
             raise ConfigError(
