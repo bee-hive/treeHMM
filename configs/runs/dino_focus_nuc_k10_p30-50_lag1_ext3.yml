@@ -1,0 +1,39 @@
+# dino_focus_nuc_k10_p30-50_lag1, with terminating nuclei held three frames.
+#
+# The test arm for cells.extend_nuclei on a DINO run.  Its control is the
+# existing dino_focus_nuc_k10_p30-50_lag1, which is identical but for
+# `extend_nuclei.frames`; compare against that and nothing else, because the
+# extension moves the cell set as well as the frame set.
+#
+# Spelled out in full rather than extending dino_focus/_base.yml, which is
+# untracked on some checkouts.  Every value below is copied from that base and
+# the arm, so the resolved document differs from the control in exactly one key.
+#
+# patch_px [30, 50] makes the `auto` boxes exclusion=50 / evidence=30 -- the
+# canonical pair, and the only configuration where the two genuinely differ.
+extends: ../default.yml
+
+run_name: dino_focus_nuc_k10_p30-50_lag1_ext3
+description: >-
+  As dino_focus_nuc_k10_p30-50_lag1, holding terminating nuclei three frames.
+
+cells:
+  source: nuclei
+  extend_nuclei:
+    frames: 3
+
+dino:
+  n_pcs: 10
+  patch_px: [30, 50]
+  patch_overlay: rfp
+  rfp_alpha: 0.3
+
+model:
+  features: []            # DINO PCs only; list replacement wipes the default four
+  use_dino_pcs: true
+  num_states: 10
+  num_lags: 1
+  em_seeds: [0, 1, 2]
+
+outputs:
+  extras: [state_timeline, condition_stats, dino_confounds]
