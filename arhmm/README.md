@@ -92,6 +92,20 @@ under `nuclei` the T-cell masks still come from the CVAT stack, because the
 nucleus segmentation covers the cancer cells only. Both sources hash into the
 `features` and `dino` keys, so the caches cannot mix.
 
+`cells.extend_nuclei` (nuclei only, off by default) holds a nucleus track that
+simply stops -- the signal is lost, possibly at death, while the cell body is
+still there -- for a few more frames, copying its final mask forward verbatim.
+It does so only when the track really ended, did not divide according to
+`nuclei_div.pkl`, has no other nucleus within `exclusion_px`, and still has a
+SAM3 phase mask within `evidence_px`, in every frame appended; otherwise it is
+held for none of them. The end of the movie clips the budget rather than
+refusing it. This is a deliberately small intervention -- 6 of 224 tracks and
+0.56% of cell-frames on the six ground-truth crops -- and `nucleus_extension.csv`
+in the features cache says which cell-frames were invented, which matters because
+a held frame freezes every shape feature. `prompts/nuclei-frame-extension.md` is
+the full criteria document; the key design note is that `config.nucleus_extension`
+returns `None` for a run that extends nothing, so no pre-existing cache key moved.
+
 The resolved document is frozen into the run directory as
 `config.resolved.yml` *before anything executes*, and every step reads that. If
 `default.yml` changes tomorrow, a rerun of an existing run directory is still

@@ -28,6 +28,32 @@ cells:
   # leading frames per cell excluded from inference; held fixed across num_lags
   warmup_frames: 1                       # int >= 1
 
+  # NUCLEI ONLY, and off by default.  A nucleus track that simply stops --
+  # possibly a death the tracker could not follow -- while the SAM3 phase track
+  # in the same place carries on is held for a few more frames, so the model
+  # sees what happens after the nucleus goes.  The mask is copied verbatim:
+  # same pixels, same shape, same centroid.  A track is held only when it did
+  # not divide, no other nucleus comes within exclusion_px of it, and SAM3 still
+  # sees something within evidence_px, in EVERY frame appended -- otherwise it
+  # is held for none of them.  Extending moves cells across cells.min_frames,
+  # so it changes the cell set and not only the frame set.
+  # See prompts/nuclei-frame-extension.md.
+  extend_nuclei:
+    # frames appended after a track's final frame; 0 disables the feature, and
+    # with 0 nothing below is read or hashed.  Clipped at the end of the movie:
+    # a track with 3 frames left is judged over 3 and, if it passes, gains 3.
+    frames: 0                            # int >= 0
+
+    # side of the square, centred on the track's last centroid, in which no
+    # pixel of any other nucleus may appear in any appended frame
+    exclusion_px: auto                   # 'auto' = max(dino.patch_px), else 50
+
+    # side of the square in which at least one non-zero SAM3 pixel must appear
+    # in every appended frame.  On a single-size DINO run 'auto' makes this
+    # equal to exclusion_px, which is legal but more permissive than the 50/30
+    # a non-DINO run gets.
+    evidence_px: auto                    # 'auto' = min(dino.patch_px), else 30
+
 # per-cell, per-frame track features computed and cached by the `features` step
 features:
   # which features to compute; `all` keeps held-out diagnostics for every run

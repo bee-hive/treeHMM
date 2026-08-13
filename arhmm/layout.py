@@ -86,6 +86,13 @@ _DERIVED = {
     # are `outputs.extras` plus whatever a DINO run gets automatically, and the
     # key has to cover what actually ran, not what was typed.
     "outputs.extras": cfgmod.resolved_extras,
+    # Resolves to None unless the run actually extends nucleus tracks, which is
+    # what keeps this feature out of the key of every run that does not -- see
+    # the None check in `_depends_payload`.  Note the SAM3 root travels inside
+    # the record rather than as a `paths.*` entry of its own: `subset` writes an
+    # absent plain key as None instead of skipping it, so a plain entry would
+    # move every `features` key in existence and orphan every cache.
+    "_derived.nucleus_extension": cfgmod.nucleus_extension,
 }
 
 
@@ -101,6 +108,7 @@ STEPS: tuple[Step, ...] = (
             "_derived.crop_ids",
             "_derived.computed_features",
             "_derived.feature_params",
+            "_derived.nucleus_extension",
         ),
         shared=True,
         summary="per-cell, per-frame features computed from the tracks",
@@ -121,6 +129,10 @@ STEPS: tuple[Step, ...] = (
             "dino.tcell_colour",
             "dino.patch_overlay",
             "dino.rfp_alpha",
+            # `dino` calls `load_crop` itself, so it reads the extended masks
+            # too.  Redundant with the chain through `features`, but each step
+            # declaring what it reads is the convention here.
+            "_derived.nucleus_extension",
         ),
         shared=True,
         summary="DINOv2 embeddings of patches centred on each cell",

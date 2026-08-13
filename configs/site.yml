@@ -31,7 +31,21 @@ paths:
   # Every non-zero label is a cancer nucleus; there is no T-cell equivalent, so
   # a nuclei run still takes its T cells from the CVAT tracks above.  These
   # supersede the flat groundTruthCalibanTracks root, whose tracks were wrong.
+  # The same crop directory also holds the division lineage for those nuclei,
+  # read only by cells.extend_nuclei:
+  #   {image_crops_dir}/{well}/{crop_id}/nuclei_div.pkl
+  # a pickled pandas DataFrame of (parent, daughter_1, daughter_2, frame).  It
+  # is NOT used to build the tree half of the model -- only to tell a nucleus
+  # that divided apart from one that simply vanished.
   image_crops_dir: /gladstone/engelhardt/lab/MarsonLabIncucyteData/TrackingCrops/CarnevaleRepStim
+
+  # SAM3 phase tracks, read only by cells.extend_nuclei.  FLAT layout -- one
+  # directory per crop id, NOT nested under the well like every other root here:
+  #   {sam3_tracks_dir}/{crop_id}/tracks.tiff   (T, H, W) uint16
+  # A flat label movie with no cell-type channel and no cancer-id list, so
+  # "a cell is here" is exactly "a non-zero pixel is here": any type, any id.
+  # These are a THIRD ID space, never reconciled with the other two.
+  sam3_tracks_dir: /gladstone/engelhardt/lab/MarsonLabIncucyteData/BenchmarkingRuns/tracking_method_outputs/SAM3_finetuned_v2
 
   # Outputs.  Both are under analysis/, which is gitignored in its entirety.
   output_root: /gladstone/engelhardt/lab/jadjasu/LiveCellUmbrella/treeHMM/analysis/runs

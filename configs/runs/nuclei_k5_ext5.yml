@@ -1,0 +1,19 @@
+# Nucleus tracks, five states, with terminating nuclei held five frames.
+#
+# Self-contained rather than extending a `nuclei_k5.yml`, so it stands up on a
+# checkout that does not have one.  Mappings merge key by key, so naming
+# `frames` alone leaves `exclusion_px`/`evidence_px` on their inherited `auto`.
+#
+# `auto` follows dino.patch_px, and this run has no DINO, so the boxes are the
+# 50/30 fallback.  Expect very few tracks to qualify -- 6 of 224 on the six
+# ground-truth crops, adding 30 of 5361 cell-frames.  See
+# prompts/nuclei-frame-extension.md.
+extends: base_k5.yml
+
+run_name: nuclei_k5_ext5
+description: As base_k5 on nucleus tracks, holding terminating nuclei 5 frames.
+
+cells:
+  source: nuclei
+  extend_nuclei:
+    frames: 5

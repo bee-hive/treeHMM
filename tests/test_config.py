@@ -23,6 +23,7 @@ from arhmm import config as C
 from arhmm import layout as L
 
 SMOKE = "configs/_smoke.yml"
+RUNS = "configs/runs"
 
 
 def _write(directory: Path, name: str, payload: dict) -> Path:
@@ -149,6 +150,19 @@ class Validation(unittest.TestCase):
              lambda c: c["outputs"]["state_age_histogram"].update(kind="violin"), "kind"),
             ("unknown age anchor",
              lambda c: c["outputs"]["state_age_histogram"].update(anchor="division"), "anchor"),
+            # `_smoke.yml` resolves to cells.source: phase, so this fires.
+            ("extension on a phase run",
+             lambda c: c["cells"]["extend_nuclei"].update(frames=5), "cells.source"),
+            ("negative extension",
+             lambda c: c["cells"]["extend_nuclei"].update(frames=-1), "frames"),
+            ("a zero exclusion box",
+             lambda c: c["cells"]["extend_nuclei"].update(exclusion_px=0), "exclusion_px"),
+            ("a named evidence box",
+             lambda c: c["cells"]["extend_nuclei"].update(evidence_px="wide"), "evidence_px"),
+            ("an evidence box wider than the exclusion box",
+             lambda c: (c["cells"].update(source="nuclei"),
+                        c["cells"]["extend_nuclei"].update(
+                            frames=5, exclusion_px=30, evidence_px=50)), "wider than"),
         ]
         for label, mutate, message in cases:
             with self.subTest(label):
@@ -240,6 +254,99 @@ class DerivedViews(unittest.TestCase):
         self.assertEqual(grouped, {"SH": ["B4_t50t100y200y350x750x900"]})
 
 
+class NucleusExtension(unittest.TestCase):
+    """The derived record that decides both the behaviour and the cache key."""
+
+    def setUp(self):
+        self.cfg = C.load_config(SMOKE)
+
+    def on(self, **extend):
+        cfg = copy.deepcopy(self.cfg)
+        cfg["cells"]["source"] = "nuclei"
+        cfg["cells"]["extend_nuclei"].update(extend)
+        return cfg
+
+    def test_it_is_none_whenever_the_run_extends_nothing(self):
+        cases = {
+            "phase, off": self.cfg,
+            "phase, asking for it": self.broken_phase(),
+            "nuclei, off": self.on(frames=0),
+        }
+        for label, cfg in cases.items():
+            with self.subTest(label):
+                self.assertIsNone(C.nucleus_extension(cfg))
+
+    def broken_phase(self):
+        cfg = copy.deepcopy(self.cfg)
+        cfg["cells"]["extend_nuclei"]["frames"] = 5
+        return cfg
+
+    def test_it_carries_the_resolved_boxes_and_the_sam3_root(self):
+        record = C.nucleus_extension(self.on(frames=5))
+        self.assertEqual(record["frames"], 5)
+        self.assertEqual((record["exclusion_px"], record["evidence_px"]),
+                         C.EXTEND_NUCLEI_FALLBACK_PX)
+        self.assertEqual(record["sam3_tracks_dir"],
+                         C.get_path(self.cfg, "paths.sam3_tracks_dir"))
+
+    def test_boxes_follow_the_patch_sizes_a_dino_run_actually_embeds(self):
+        cases = [
+            (False, 80, C.EXTEND_NUCLEI_FALLBACK_PX),   # a knob the run never reads
+            (True, 50, (50, 50)),                       # one size: widest == narrowest
+            (True, [70, 30, 50], (70, 30)),
+        ]
+        for uses_dino, patch_px, expected in cases:
+            with self.subTest(patch_px=patch_px, dino=uses_dino):
+                cfg = self.on(frames=5)
+                cfg["model"]["use_dino_pcs"] = uses_dino
+                cfg["dino"]["patch_px"] = patch_px
+                self.assertEqual(C.nucleus_extension_boxes(cfg), expected)
+
+    def test_a_single_size_hashes_the_same_scalar_or_list(self):
+        """Same normalization `dino_patch_key` does, for the same reason."""
+        records = []
+        for patch_px in (50, [50], [50, 50]):
+            cfg = self.on(frames=5)
+            cfg["model"]["use_dino_pcs"] = True
+            cfg["dino"]["patch_px"] = patch_px
+            records.append(C.nucleus_extension(cfg))
+        self.assertEqual(records[0], records[1])
+        self.assertEqual(records[1], records[2])
+
+
+class GoldenKeys(unittest.TestCase):
+    """Cache keys that name directories already on disk under `analysis/cache`.
+
+    These are not arbitrary regression values: a change here orphans real
+    cached artifacts and silently recomputes hours of work.  `nuclei_k5.yml` and
+    `nuclei_dino_k5.yml` are reconstructed rather than loaded because they are
+    untracked in some checkouts; `run_name` is in no step's `depends`, so the
+    reconstruction hashes identically to the file.
+    """
+
+    @staticmethod
+    def nuclei(path):
+        cfg = C.load_config(path)
+        cfg["cells"]["source"] = "nuclei"
+        return cfg
+
+    def test_the_live_cache_keys_have_not_moved(self):
+        cases = [
+            ("_smoke", C.load_config(SMOKE), {"features": "b01a3d265189"}),
+            ("base_k5", C.load_config(f"{RUNS}/base_k5.yml"), {"features": "f640ca30feac"}),
+            ("dino_k5", C.load_config(f"{RUNS}/dino_k5.yml"),
+             {"features": "f640ca30feac", "dino": "e6f5d31e5a1a"}),
+            ("nuclei_k5", self.nuclei(f"{RUNS}/base_k5.yml"), {"features": "db4409ef2642"}),
+            ("nuclei_dino_k5", self.nuclei(f"{RUNS}/dino_k5.yml"),
+             {"features": "db4409ef2642", "dino": "114473663754"}),
+        ]
+        for label, cfg, expected in cases:
+            with self.subTest(label):
+                active = {s.name for s in L.active_steps(cfg)}
+                got = {n: L.step_key(cfg, n) for n in expected if n in active}
+                self.assertEqual(got, expected)
+
+
 class CacheKeys(unittest.TestCase):
     def setUp(self):
         # Extras are pinned off rather than inherited, so these expectations do
@@ -328,10 +435,49 @@ class CacheKeys(unittest.TestCase):
             ("the cell source invalidates features downward",
              lambda c: c["cells"].update(source="nuclei"),
              ["features", "fit", "outputs"]),
+            # Nothing about a feature this run does not use may move a key --
+            # otherwise adding the block to default.yml orphans every cache.
+            ("the extension block itself changes nothing while it is off",
+             lambda c: c["cells"]["extend_nuclei"].update(frames=0), []),
+            ("the sam3 root does not matter while the extension is off",
+             lambda c: c["paths"].update(sam3_tracks_dir="/elsewhere"), []),
+            ("the extension boxes do not matter while it is off",
+             lambda c: c["cells"]["extend_nuclei"].update(exclusion_px=11, evidence_px=7), []),
         ]
         for label, mutate, expected in cases:
             with self.subTest(label):
                 self.assertEqual(self.changed(mutate), expected)
+
+    def test_turning_the_extension_on_invalidates_features_downward(self):
+        nuclei = copy.deepcopy(self.cfg)
+        nuclei["cells"]["source"] = "nuclei"
+        self.assertEqual(
+            self.changed(lambda c: c["cells"]["extend_nuclei"].update(frames=5), base=nuclei),
+            ["features", "fit", "outputs"],
+        )
+
+    def test_the_sam3_root_matters_once_the_extension_is_on(self):
+        """It travels inside the derived record rather than as a `paths.*` key,
+        so this is the only thing proving it is hashed at all."""
+        base = copy.deepcopy(self.cfg)
+        base["cells"]["source"] = "nuclei"
+        base["cells"]["extend_nuclei"]["frames"] = 5
+        self.assertEqual(
+            self.changed(lambda c: c["paths"].update(sam3_tracks_dir="/elsewhere"), base=base),
+            ["features", "fit", "outputs"],
+        )
+
+    def test_patch_sizes_reach_features_only_while_the_extension_is_on(self):
+        """A new coupling, and an intended one: with `auto` boxes the patch
+        sizes decide what the `features` step computes."""
+        base = copy.deepcopy(self.cfg)
+        base["cells"]["source"] = "nuclei"
+        base["model"]["use_dino_pcs"] = True
+        resize = lambda c: c["dino"].update(patch_px=[30, 80])  # noqa: E731
+
+        self.assertNotIn("features", self.changed(resize, base=base))
+        base["cells"]["extend_nuclei"]["frames"] = 5
+        self.assertIn("features", self.changed(resize, base=base))
 
     def test_the_image_root_invalidates_both_sources(self):
         """It carries the nucleus tracks as well as the image, for either source.
