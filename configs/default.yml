@@ -23,7 +23,7 @@ cells:
   source: phase                          # [phase, nuclei]
 
   # drop cells observed for fewer than this many frames
-  min_frames: 10                         # int > cells.warmup_frames
+  min_frames: 1                         # int > cells.warmup_frames
 
   # leading frames per cell excluded from inference; held fixed across num_lags
   warmup_frames: 1                       # int >= 1
