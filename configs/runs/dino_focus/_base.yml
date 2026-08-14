@@ -1,0 +1,60 @@
+# Everything the dino_focus arms share.  Not meant to be run directly.
+#
+# The emission vector is the ten whitened DINOv2 PCs and NOTHING else: this
+# sweep asks what appearance alone can separate, on the nuclei label
+# space.  `features.compute` stays `all` so every track feature survives as a
+# held-out diagnostic -- that is what makes a state description checkable
+# against a quantity the model never saw.
+#
+# The three axes are dino.patch_px, model.num_states and model.num_lags; every
+# arm restates all three, so the file alone tells you where in the grid it sits:
+#
+#   patch_px    30  barely more than the nucleus itself, almost no context
+#               50  the nucleus plus its immediate surround
+#               70  wide enough to pull in neighbouring cells and their contacts
+#               -- the original 30 arms take one size each, deliberately: that
+#                  grid asks what each scale sees on its own.
+#               24-40, 30-50, 30-60  multi-scale arms: BOTH sizes are embedded
+#                  and the two embeddings AVERAGED before PCA, so the arm asks
+#                  what the pair sees together rather than choosing between
+#                  them.  Named with a dash, `p30-50`, so the sweep driver
+#                  builds their paths the same way -- see the DINO_FOCUS_PX
+#                  example in scripts/run_dino_focus.sh.
+#   num_states  6, 7, 8, 9, 10
+#   num_lags    1  AR(1)
+#               0  no AR term; the state alone has to explain the appearance
+#
+# One caveat about state numbering.  With `model.features: []`, emission
+# dimension 0 is dino_pc_0, and that is what states are sorted by.  Each patch
+# size gets its own PCA fit, so PC0's sign and meaning differ between patch
+# sizes: state numbers are comparable between arms sharing a patch size, never
+# across patch sizes.  Compare those by content (state_feature_summary.csv, the
+# overlays), never by label.  Across num_states they are never comparable by
+# label at all.
+
+extends: ../../default.yml
+
+run_name: _dino_focus_nuc_base
+description: Base for the dino_focus nuclei sweep; not meant to be run directly.
+
+cells:
+  source: nuclei
+
+dino:
+  n_pcs: 10
+  patch_px: [50]            # overridden per arm
+  patch_overlay: rfp
+  rfp_alpha: 0.3
+
+model:
+  features: []            # DINO PCs only; list replacement wipes the default four
+  use_dino_pcs: true
+  num_states: 6           # overridden per arm
+  num_lags: 1             # overridden per arm
+  em_seeds: [0, 1, 2]
+
+outputs:
+  # dino_confounds is not optional reading for a DINO-only run: with no track
+  # feature in the emission vector, a leading component that tracks frame index
+  # or crop identity means the states describe acquisition, not phenotype.
+  extras: [state_timeline, condition_stats, dino_confounds]
