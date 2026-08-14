@@ -130,7 +130,8 @@ class Validation(unittest.TestCase):
             ("duplicate crops", lambda c: c["data"].update(crop_ids=["x", "x"]), "duplicates"),
             ("unknown cell source", lambda c: c["cells"].update(source="wat"), "cells.source"),
             ("zero warmup", lambda c: c["cells"].update(warmup_frames=0), "warmup_frames"),
-            ("min_frames below warmup", lambda c: c["cells"].update(min_frames=1), "min_frames"),
+            ("min_frames below warmup", lambda c: c["cells"].update(min_frames=0), "min_frames"),
+            ("boolean min_frames", lambda c: c["cells"].update(min_frames=True), "min_frames"),
             ("unknown computed feature",
              lambda c: c["features"].update(compute=["not_a_feature"]), "unknown feature"),
             ("unknown model feature",
@@ -168,6 +169,16 @@ class Validation(unittest.TestCase):
             with self.subTest(label):
                 with self.assertRaisesRegex(C.ConfigError, message):
                     C.validate(self.broken(mutate))
+
+    def test_min_frames_may_equal_warmup(self):
+        """`apply_warmup` keeps a one-frame cell's only frame, so this is legal.
+
+        The `>` rule that used to reject it made `min_frames: 1` unreachable --
+        `warmup_frames` is itself forced to >= 1 -- which put single-frame tracks
+        permanently out of reach of every run.
+        """
+        cfg = self.broken(lambda c: c["cells"].update(min_frames=1, warmup_frames=1))
+        C.validate(cfg)
 
     def test_model_features_must_be_computed(self):
         def mutate(c):
@@ -285,33 +296,42 @@ class NucleusExtension(unittest.TestCase):
         record = C.nucleus_extension(self.on(frames=5))
         self.assertEqual(record["frames"], 5)
         self.assertEqual((record["exclusion_px"], record["evidence_px"]),
-                         C.EXTEND_NUCLEI_FALLBACK_PX)
+                         C.EXTEND_NUCLEI_DEFAULT_PX)
         self.assertEqual(record["sam3_tracks_dir"],
                          C.get_path(self.cfg, "paths.sam3_tracks_dir"))
 
-    def test_boxes_follow_the_patch_sizes_a_dino_run_actually_embeds(self):
-        cases = [
-            (False, 80, C.EXTEND_NUCLEI_FALLBACK_PX),   # a knob the run never reads
-            (True, 50, (50, 50)),                       # one size: widest == narrowest
-            (True, [70, 30, 50], (70, 30)),
-        ]
-        for uses_dino, patch_px, expected in cases:
+    def test_boxes_are_read_verbatim(self):
+        cfg = self.on(frames=5, exclusion_px=64, evidence_px=16)
+        self.assertEqual(C.nucleus_extension_boxes(cfg), (64, 16))
+
+    def test_boxes_ignore_dino_entirely(self):
+        """The old `auto` took them from `dino.patch_px`; nothing does now.
+
+        Retuning the patch sizes must not silently move which tracks are held:
+        the extension reads the nucleus stack, `nuclei_div.pkl` and the SAM3
+        masks, and DINO supplies none of the three.
+        """
+        for uses_dino, patch_px in ((False, 80), (True, 50), (True, [70, 30, 50])):
             with self.subTest(patch_px=patch_px, dino=uses_dino):
                 cfg = self.on(frames=5)
                 cfg["model"]["use_dino_pcs"] = uses_dino
                 cfg["dino"]["patch_px"] = patch_px
-                self.assertEqual(C.nucleus_extension_boxes(cfg), expected)
+                self.assertEqual(C.nucleus_extension_boxes(cfg),
+                                 C.EXTEND_NUCLEI_DEFAULT_PX)
 
-    def test_a_single_size_hashes_the_same_scalar_or_list(self):
-        """Same normalization `dino_patch_key` does, for the same reason."""
-        records = []
-        for patch_px in (50, [50], [50, 50]):
-            cfg = self.on(frames=5)
-            cfg["model"]["use_dino_pcs"] = True
-            cfg["dino"]["patch_px"] = patch_px
-            records.append(C.nucleus_extension(cfg))
-        self.assertEqual(records[0], records[1])
-        self.assertEqual(records[1], records[2])
+    def test_the_extension_needs_nuclei_but_not_dino(self):
+        """`cells.source: nuclei` is the whole requirement."""
+        cfg = self.on(frames=5)
+        cfg["model"]["use_dino_pcs"] = False
+        C.validate(cfg)
+        self.assertIsNotNone(C.nucleus_extension(cfg))
+
+    def test_auto_is_refused_with_a_migration_message(self):
+        for key in ("exclusion_px", "evidence_px"):
+            with self.subTest(key):
+                cfg = self.on(frames=5, **{key: "auto"})
+                with self.assertRaisesRegex(C.ConfigError, "was removed"):
+                    C.nucleus_extension_boxes(cfg)
 
 
 class GoldenKeys(unittest.TestCase):
@@ -467,9 +487,12 @@ class CacheKeys(unittest.TestCase):
             ["features", "fit", "outputs"],
         )
 
-    def test_patch_sizes_reach_features_only_while_the_extension_is_on(self):
-        """A new coupling, and an intended one: with `auto` boxes the patch
-        sizes decide what the `features` step computes."""
+    def test_patch_sizes_never_reach_features(self):
+        """The `auto` boxes used to make them, which was the wrong coupling.
+
+        `features` reads no DINO input, so retuning `dino.patch_px` must
+        recompute embeddings and nothing else -- with the extension on or off.
+        """
         base = copy.deepcopy(self.cfg)
         base["cells"]["source"] = "nuclei"
         base["model"]["use_dino_pcs"] = True
@@ -477,7 +500,18 @@ class CacheKeys(unittest.TestCase):
 
         self.assertNotIn("features", self.changed(resize, base=base))
         base["cells"]["extend_nuclei"]["frames"] = 5
-        self.assertIn("features", self.changed(resize, base=base))
+        self.assertNotIn("features", self.changed(resize, base=base))
+
+    def test_the_boxes_invalidate_features_once_the_extension_is_on(self):
+        """They are now the only thing that sizes the criteria, so they must."""
+        base = copy.deepcopy(self.cfg)
+        base["cells"]["source"] = "nuclei"
+        base["cells"]["extend_nuclei"]["frames"] = 5
+        self.assertIn(
+            "features",
+            self.changed(lambda c: c["cells"]["extend_nuclei"].update(exclusion_px=64),
+                         base=base),
+        )
 
     def test_the_image_root_invalidates_both_sources(self):
         """It carries the nucleus tracks as well as the image, for either source.

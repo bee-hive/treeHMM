@@ -70,9 +70,12 @@ AGE_ANCHORS = ("existence", "inferred")
 #: `outputs.auto_dino_extras: false` to run only what the config names.
 DINO_DEFAULT_EXTRAS = ("dino_step_distance",)
 
-#: Box sides for `cells.extend_nuclei` when the run has no DINO patch sizes to
-#: take them from: `(exclusion, evidence)`, in pixels.
-EXTEND_NUCLEI_FALLBACK_PX = (50, 30)
+#: Default box sides for `cells.extend_nuclei`: `(exclusion, evidence)`, in
+#: pixels.  Both are ordinary config options -- see `nucleus_extension_boxes`
+#: for why they no longer follow `dino.patch_px`.  These values are what the
+#: old `auto` resolved to on every run that has been executed, so making them
+#: the default orphaned no cache.
+EXTEND_NUCLEI_DEFAULT_PX = (50, 30)
 
 
 class ConfigError(Exception):
@@ -471,18 +474,21 @@ def dino_patch_key(cfg: dict) -> int | list[int]:
 
 
 def nucleus_extension_boxes(cfg: dict) -> tuple[int, int]:
-    """`(exclusion_px, evidence_px)` for `cells.extend_nuclei`, resolved.
+    """`(exclusion_px, evidence_px)` for `cells.extend_nuclei`.
 
-    `auto` follows the patches the run actually embeds -- widest for the
-    exclusion box, narrowest for the evidence box -- because those are the
-    windows the model will see the cell through, and a decision about whether a
-    neighbour would contaminate the patch should be made over the patch.  A run
-    that feeds no DINO components has no such sizes and falls back to
-    `EXTEND_NUCLEI_FALLBACK_PX`.
+    Both are plain configuration values, read verbatim, defaulting to
+    `EXTEND_NUCLEI_DEFAULT_PX`.
 
-    Keyed off `uses_dino` rather than off `dino.patch_px` being present, so a
-    knob a run never reads cannot change what that run does.  Note that a
-    single-size DINO run has `max == min`, which makes the two boxes equal.
+    They used to be derivable from `dino.patch_px` via `auto` -- widest for the
+    exclusion box, narrowest for the evidence box -- on the reasoning that the
+    patch is the window the model sees the cell through.  That coupling is gone.
+    It tied a decision about the *nucleus tracks* to a knob describing an
+    unrelated modality: retuning the patch sizes silently moved the boxes, and
+    hence which tracks were held, in a run whose extension question had not
+    changed at all.  Nothing the extension reads -- the nucleus stack,
+    `nuclei_div.pkl`, the SAM3 masks -- is a DINO input, and the extension is
+    available to any `cells.source: nuclei` run whether or not it embeds
+    anything.
 
     Args:
         cfg (dict): resolved configuration.
@@ -491,23 +497,21 @@ def nucleus_extension_boxes(cfg: dict) -> tuple[int, int]:
         tuple[int, int]: exclusion and evidence box sides, in pixels.
 
     Raises:
-        ConfigError: an explicit side is neither `auto` nor an int >= 1.
+        ConfigError: either side is not an int >= 1, or is the removed `auto`.
     """
-    fallback_exclusion, fallback_evidence = EXTEND_NUCLEI_FALLBACK_PX
-    if uses_dino(cfg):
-        sizes = dino_patch_sizes(cfg)
-        fallback_exclusion, fallback_evidence = max(sizes), min(sizes)
-
     resolved = []
-    for key, auto in (("exclusion_px", fallback_exclusion), ("evidence_px", fallback_evidence)):
-        value = get_path(cfg, f"cells.extend_nuclei.{key}", "auto")
+    for key, default in zip(("exclusion_px", "evidence_px"), EXTEND_NUCLEI_DEFAULT_PX):
+        value = get_path(cfg, f"cells.extend_nuclei.{key}", default)
         if value == "auto":
-            resolved.append(int(auto))
-            continue
+            raise ConfigError(
+                f"cells.extend_nuclei.{key}: 'auto' was removed -- the boxes no "
+                f"longer follow dino.patch_px.  Write the size you want, in "
+                f"pixels; the previous default was {default}"
+            )
         # bool is an int subclass, and `exclusion_px: true` is never meant.
         if not isinstance(value, int) or isinstance(value, bool) or value < 1:
             raise ConfigError(
-                f"cells.extend_nuclei.{key} must be 'auto' or an int >= 1, got {value!r}"
+                f"cells.extend_nuclei.{key} must be an int >= 1, got {value!r}"
             )
         resolved.append(int(value))
     return resolved[0], resolved[1]
@@ -524,12 +528,12 @@ def nucleus_extension(cfg: dict) -> dict | None:
     This one function decides both the cache key and the behaviour -- `cells`
     calls it to find out whether to extend at all -- so the two cannot diverge.
 
-    The payload carries the *resolved* box sides, so `dino.patch_px` of `50`,
-    `[50]` and `[50, 50]` all produce the same record.  That is the same
-    normalization `dino_patch_key` does for the `dino` step.  A consequence
-    worth knowing: with extension on, a non-DINO run and a DINO run whose sizes
-    resolve to the same pair share a `features` key, which is correct, because
-    the `features` step does literally the same thing in both.
+    The payload carries the box sides, which are now plain config values, so
+    nothing about `dino` reaches it.  Two runs that name the same boxes share a
+    `features` key whether either embeds anything or not, which is correct: the
+    `features` step does literally the same thing in both.  The gate is
+    `cells.source: nuclei` alone -- a run needs nucleus centroids to extend
+    from, and nothing else.
 
     Args:
         cfg (dict): resolved configuration.
@@ -666,9 +670,17 @@ def validate(cfg: dict) -> None:
             f"undefined on a cell's first active frame (got {warmup!r})"
         )
     min_frames = get_path(cfg, "cells.min_frames")
-    if not isinstance(min_frames, int) or min_frames <= warmup:
+    # `>=`, not `>`: `apply_warmup` keeps a cell's final frame when the warmup
+    # would empty it, so `min_frames == warmup_frames` admits cells rather than
+    # filtering every one away.  Such a cell reaches the model as a single
+    # new-root frame, and `compute_inputs` zeroes the AR input at every root, so
+    # it is the same shape as the first surviving frame of any longer cell.
+    # What it does NOT get is a defined temporal feature: `velocity` and every
+    # delta are NaN on a first active frame, so set `min_frames` this low only
+    # when `model.features` is empty or holds no temporal feature.
+    if not isinstance(min_frames, int) or isinstance(min_frames, bool) or min_frames < warmup:
         raise ConfigError(
-            f"cells.min_frames ({min_frames!r}) must be an integer greater than "
+            f"cells.min_frames ({min_frames!r}) must be an integer >= "
             f"cells.warmup_frames ({warmup}), or every cell is filtered away"
         )
 

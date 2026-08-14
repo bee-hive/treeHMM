@@ -54,8 +54,11 @@ the tracker could not follow — for `frames` more frames, copying its final mas
 verbatim. A track qualifies only if it really ended, is not a parent in `nuclei_div.pkl`, has
 no other nucleus within `exclusion_px` and still has a SAM3 mask within `evidence_px`, in
 every frame appended; otherwise it gains none. The end of the movie clips the budget rather
-than refusing it, and the boxes default to the widest and narrowest `dino.patch_px` (50/30
-without DINO). It is deliberately small — 6 of 224 tracks on the ground-truth crops — and
+than refusing it. `exclusion_px` and `evidence_px` are ordinary config options (50/30 by
+default) — **DINO is not involved**: `cells.source: nuclei` is the entire requirement, because
+the criteria are measured from the nucleus centroid. They used to be derivable from
+`dino.patch_px` via `auto`, which is gone; a config still saying `auto` is refused by name.
+It is deliberately small — 6 of 224 tracks on the ground-truth crops — and
 `nucleus_extension.csv` in the features cache records every candidate and its verdict, which
 you need because a held frame freezes every shape feature. Full criteria in
 `prompts/nuclei-frame-extension.md`.

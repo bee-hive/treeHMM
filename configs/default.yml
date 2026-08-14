@@ -22,8 +22,11 @@ cells:
   # and t_cell_neighbors are not comparable between the two.
   source: phase                          # [phase, nuclei]
 
-  # drop cells observed for fewer than this many frames
-  min_frames: 10                         # int > cells.warmup_frames
+  # drop cells observed for fewer than this many frames.  Equal to warmup_frames
+  # is the floor and admits single-frame tracks: they survive as one new-root
+  # frame, on which every temporal feature is NaN -- fine for a DINO-only run,
+  # not for one whose model.features holds a delta.
+  min_frames: 10                         # int >= cells.warmup_frames
 
   # leading frames per cell excluded from inference; held fixed across num_lags
   warmup_frames: 1                       # int >= 1
@@ -36,7 +39,9 @@ cells:
   # not divide, no other nucleus comes within exclusion_px of it, and SAM3 still
   # sees something within evidence_px, in EVERY frame appended -- otherwise it
   # is held for none of them.  Extending moves cells across cells.min_frames,
-  # so it changes the cell set and not only the frame set.
+  # so it changes the cell set and not only the frame set.  DINO is irrelevant
+  # to all of it: cells.source: nuclei is the only requirement, because the
+  # criteria are measured from the nucleus centroid.
   # See prompts/nuclei-frame-extension.md.
   extend_nuclei:
     # frames appended after a track's final frame; 0 disables the feature, and
@@ -45,14 +50,14 @@ cells:
     frames: 0                            # int >= 0
 
     # side of the square, centred on the track's last centroid, in which no
-    # pixel of any other nucleus may appear in any appended frame
-    exclusion_px: auto                   # 'auto' = max(dino.patch_px), else 50
+    # pixel of any other nucleus may appear in any appended frame.  Widen it to
+    # reject more aggressively; narrow it to tolerate closer neighbours.
+    exclusion_px: 50                     # int >= 1
 
     # side of the square in which at least one non-zero SAM3 pixel must appear
-    # in every appended frame.  On a single-size DINO run 'auto' makes this
-    # equal to exclusion_px, which is legal but more permissive than the 50/30
-    # a non-DINO run gets.
-    evidence_px: auto                    # 'auto' = min(dino.patch_px), else 30
+    # in every appended frame.  Must not exceed exclusion_px, or the evidence
+    # box would reach outside the region the neighbour test cleared.
+    evidence_px: 30                      # int >= 1, <= exclusion_px
 
 # per-cell, per-frame track features computed and cached by the `features` step
 features:

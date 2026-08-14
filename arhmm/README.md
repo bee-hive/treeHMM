@@ -99,7 +99,13 @@ It does so only when the track really ended, did not divide according to
 `nuclei_div.pkl`, has no other nucleus within `exclusion_px`, and still has a
 SAM3 phase mask within `evidence_px`, in every frame appended; otherwise it is
 held for none of them. The end of the movie clips the budget rather than
-refusing it. This is a deliberately small intervention -- 6 of 224 tracks and
+refusing it. Both boxes are plain config options defaulting to 50/30; they are
+deliberately *not* derived from `dino.patch_px`, because the criteria read the
+nucleus stack, `nuclei_div.pkl` and the SAM3 masks and none of those is a DINO
+input -- retuning the patch sizes must not silently change which tracks are
+held. `cells.source: nuclei` is the only prerequisite; a run needs nucleus
+centroids to measure from, not embeddings. This is a deliberately small
+intervention -- 6 of 224 tracks and
 0.56% of cell-frames on the six ground-truth crops -- and `nucleus_extension.csv`
 in the features cache says which cell-frames were invented, which matters because
 a held frame freezes every shape feature. `prompts/nuclei-frame-extension.md` is
