@@ -20,15 +20,28 @@ Written per crop, into `{cache}/features/{key}/{crop}/`:
     meta.json
         feature_names, feature_units, crop_id, cell_source, num_frames, num_cells
 
+    nucleus_extension.csv                       only when cells.extend_nuclei ran
+        one row per terminating nucleus track, held or not, with the reason
+
 Strings live in the JSON sidecar rather than the npz because the three conda
 environments are on different numpy majors and only numeric and bool arrays
 round-trip between them.
+
+The held frames are deliberately **not** flagged in `features.npz`: they are
+already fully expressed in `active_mask`, and the array contract is what every
+downstream stage asserts against.  `nucleus_extension.csv` is where to look to
+tell an observed cell-frame from an invented one -- which matters, because a
+held frame repeats its predecessor's mask exactly, so every shape feature is
+frozen across it and every temporal feature sees zero motion.
 
 Run inside the imaging environment.
 """
 
 from __future__ import annotations
 
+import collections
+import csv
+import dataclasses
 import sys
 
 import numpy as np
@@ -38,6 +51,44 @@ from arhmm.core import cells as cellsmod
 from arhmm.core import io, lineage
 from arhmm.core import trackfeatures as tf
 from arhmm.steps import step_main
+
+
+def _write_extension_csv(path, crop_id: str, records) -> None:
+    """One row per terminating nucleus track, held or not.
+
+    Written here rather than in `load_crop`, which three steps call: a shared
+    cache directory needs exactly one writer.  Written even when empty, so its
+    absence unambiguously means the feature was off.
+    """
+    fields = ["crop_id"] + [f.name for f in dataclasses.fields(cellsmod.ExtensionRecord)]
+    with io.atomic_write(path, "w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        for record in records:
+            writer.writerow({"crop_id": crop_id, **dataclasses.asdict(record)})
+
+
+def _extension_summary(records) -> dict:
+    """Counts for `summary.yml`, tallied two ways.
+
+    `by_reason` attributes each track to a single cause, in the order the
+    planner applies them; `blocked_by` counts each criterion independently, so
+    the two answer "why was this track rejected" and "how often does this
+    criterion bite" without either being read as the other.
+    """
+    held = [r for r in records if r.frames_added]
+    return {
+        "candidates": len(records),
+        "extended": len(held),
+        "added_cell_frames": sum(r.frames_added for r in held),
+        "clipped_short": sum(1 for r in held if r.frames_added < r.frames_available),
+        "by_reason": dict(sorted(collections.Counter(r.reason for r in records).items())),
+        "blocked_by": {
+            "divides": sum(1 for r in records if r.divides),
+            "neighbour_in_box": sum(1 for r in records if r.neighbour_in_box),
+            "no_sam3_evidence": sum(1 for r in records if r.sam3_evidence is False),
+        },
+    }
 
 
 def _run(cfg: dict, layout, args) -> dict:
@@ -90,6 +141,8 @@ def _run(cfg: dict, layout, args) -> dict:
                 "num_cells": crop.num_cells,
             },
         )
+        if crop.extension is not None:
+            _write_extension_csv(crop_dir / "nucleus_extension.csv", crop_id, crop.extension)
 
         counts = lineage.summarize(masks)
         active_mask = masks["active_mask"]
@@ -123,10 +176,23 @@ def _run(cfg: dict, layout, args) -> dict:
             "undefined_on_active": undefined,
             "out_of_bounds_on_active": out_of_bounds,
         }
+        if crop.extension is not None:
+            summary[crop_id]["nucleus_extension"] = _extension_summary(crop.extension)
         print(
             f"  [{crop_id}] {counts['num_cells']} cells, {counts['num_frames']} frames, "
             f"{counts['active_cell_frames']} active cell-frames"
         )
+        if crop.extension is not None:
+            report = summary[crop_id]["nucleus_extension"]
+            blocked = report["blocked_by"]
+            print(
+                f"      extension: {report['extended']} of {report['candidates']} tracks held, "
+                f"{report['added_cell_frames']} cell-frames added "
+                f"({report['clipped_short']} clipped by the end of the movie); "
+                f"blocked: {blocked['divides']} division, "
+                f"{blocked['neighbour_in_box']} neighbour, "
+                f"{blocked['no_sam3_evidence']} no SAM3"
+            )
         for name, count in undefined.items():
             if count:
                 print(f"      {name}: {count} undefined (NaN) on active cell-frames")
@@ -145,6 +211,9 @@ def _run(cfg: dict, layout, args) -> dict:
             "features": requested,
             "params": {k: params.get(k) for k in sorted(tf.required_params(requested))},
             "cell_source": cfgmod.get_path(cfg, "cells.source"),
+            # The record that was hashed into this step's cache key, so the
+            # artifact says exactly what produced it.  None when off.
+            "nucleus_extension": cfgmod.nucleus_extension(cfg),
             "crops": summary,
         },
     )

@@ -70,6 +70,13 @@ AGE_ANCHORS = ("existence", "inferred")
 #: `outputs.auto_dino_extras: false` to run only what the config names.
 DINO_DEFAULT_EXTRAS = ("dino_step_distance",)
 
+#: Default box sides for `cells.extend_nuclei`: `(exclusion, evidence)`, in
+#: pixels.  Both are ordinary config options -- see `nucleus_extension_boxes`
+#: for why they no longer follow `dino.patch_px`.  These values are what the
+#: old `auto` resolved to on every run that has been executed, so making them
+#: the default orphaned no cache.
+EXTEND_NUCLEI_DEFAULT_PX = (50, 30)
+
 
 class ConfigError(Exception):
     """A configuration is malformed, contradictory, or names something unknown."""
@@ -466,6 +473,91 @@ def dino_patch_key(cfg: dict) -> int | list[int]:
     return sizes[0] if len(sizes) == 1 else sizes
 
 
+def nucleus_extension_boxes(cfg: dict) -> tuple[int, int]:
+    """`(exclusion_px, evidence_px)` for `cells.extend_nuclei`.
+
+    Both are plain configuration values, read verbatim, defaulting to
+    `EXTEND_NUCLEI_DEFAULT_PX`.
+
+    They used to be derivable from `dino.patch_px` via `auto` -- widest for the
+    exclusion box, narrowest for the evidence box -- on the reasoning that the
+    patch is the window the model sees the cell through.  That coupling is gone.
+    It tied a decision about the *nucleus tracks* to a knob describing an
+    unrelated modality: retuning the patch sizes silently moved the boxes, and
+    hence which tracks were held, in a run whose extension question had not
+    changed at all.  Nothing the extension reads -- the nucleus stack,
+    `nuclei_div.pkl`, the SAM3 masks -- is a DINO input, and the extension is
+    available to any `cells.source: nuclei` run whether or not it embeds
+    anything.
+
+    Args:
+        cfg (dict): resolved configuration.
+
+    Returns:
+        tuple[int, int]: exclusion and evidence box sides, in pixels.
+
+    Raises:
+        ConfigError: either side is not an int >= 1, or is the removed `auto`.
+    """
+    resolved = []
+    for key, default in zip(("exclusion_px", "evidence_px"), EXTEND_NUCLEI_DEFAULT_PX):
+        value = get_path(cfg, f"cells.extend_nuclei.{key}", default)
+        if value == "auto":
+            raise ConfigError(
+                f"cells.extend_nuclei.{key}: 'auto' was removed -- the boxes no "
+                f"longer follow dino.patch_px.  Write the size you want, in "
+                f"pixels; the previous default was {default}"
+            )
+        # bool is an int subclass, and `exclusion_px: true` is never meant.
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            raise ConfigError(
+                f"cells.extend_nuclei.{key} must be an int >= 1, got {value!r}"
+            )
+        resolved.append(int(value))
+    return resolved[0], resolved[1]
+
+
+def nucleus_extension(cfg: dict) -> dict | None:
+    """What `cells.extend_nuclei` will do for this run, or None if nothing.
+
+    Returns **None** rather than a disabled record, and that is the whole
+    design: `layout._depends_payload` drops a derived key resolving to None, so
+    the `features` key of every run that extends nothing is bit-for-bit what it
+    was before this feature existed.  See the `_DERIVED` comment in `layout`.
+
+    This one function decides both the cache key and the behaviour -- `cells`
+    calls it to find out whether to extend at all -- so the two cannot diverge.
+
+    The payload carries the box sides, which are now plain config values, so
+    nothing about `dino` reaches it.  Two runs that name the same boxes share a
+    `features` key whether either embeds anything or not, which is correct: the
+    `features` step does literally the same thing in both.  The gate is
+    `cells.source: nuclei` alone -- a run needs nucleus centroids to extend
+    from, and nothing else.
+
+    Args:
+        cfg (dict): resolved configuration.
+
+    Returns:
+        dict | None: `frames`, `exclusion_px`, `evidence_px` and
+            `sam3_tracks_dir`, or None when this run extends nothing.
+    """
+    if get_path(cfg, "cells.source", None) != "nuclei":
+        return None
+    frames = get_path(cfg, "cells.extend_nuclei.frames", 0) or 0
+    if not frames:
+        return None
+    exclusion_px, evidence_px = nucleus_extension_boxes(cfg)
+    return {
+        "frames": int(frames),
+        "exclusion_px": exclusion_px,
+        "evidence_px": evidence_px,
+        # Raw, exactly as `subset` would hash `paths.image_crops_dir`.  Wrapping
+        # it in Path() here would give the two conventions different strings.
+        "sam3_tracks_dir": get_path(cfg, "paths.sam3_tracks_dir", None),
+    }
+
+
 def emission_names(cfg: dict) -> list[str]:
     """Names of the emission dimensions, in the order the model sees them.
 
@@ -578,10 +670,46 @@ def validate(cfg: dict) -> None:
             f"undefined on a cell's first active frame (got {warmup!r})"
         )
     min_frames = get_path(cfg, "cells.min_frames")
-    if not isinstance(min_frames, int) or min_frames <= warmup:
+    # `>=`, not `>`: `apply_warmup` keeps a cell's final frame when the warmup
+    # would empty it, so `min_frames == warmup_frames` admits cells rather than
+    # filtering every one away.  Such a cell reaches the model as a single
+    # new-root frame, and `compute_inputs` zeroes the AR input at every root, so
+    # it is the same shape as the first surviving frame of any longer cell.
+    # What it does NOT get is a defined temporal feature: `velocity` and every
+    # delta are NaN on a first active frame, so set `min_frames` this low only
+    # when `model.features` is empty or holds no temporal feature.
+    if not isinstance(min_frames, int) or isinstance(min_frames, bool) or min_frames < warmup:
         raise ConfigError(
-            f"cells.min_frames ({min_frames!r}) must be an integer greater than "
+            f"cells.min_frames ({min_frames!r}) must be an integer >= "
             f"cells.warmup_frames ({warmup}), or every cell is filtered away"
+        )
+
+    # Checked explicitly because nothing in this function rejects unknown keys:
+    # without this block a typo'd `extend_nucleii` would silently disable the
+    # feature and the run would look as though it had worked.
+    extend = get_path(cfg, "cells.extend_nuclei", {}) or {}
+    if not isinstance(extend, dict):
+        raise ConfigError(f"cells.extend_nuclei must be a mapping, got {extend!r}")
+    extend_frames = extend.get("frames", 0)
+    if not isinstance(extend_frames, int) or isinstance(extend_frames, bool) or extend_frames < 0:
+        raise ConfigError(
+            f"cells.extend_nuclei.frames must be an integer >= 0, got {extend_frames!r}"
+        )
+    if extend_frames and source != "nuclei":
+        raise ConfigError(
+            f"cells.extend_nuclei.frames is {extend_frames}, but cells.source is "
+            f"{source!r}: only nucleus tracks are extended -- the CVAT tracks are "
+            f"ground truth"
+        )
+    # Resolves 'auto' and rejects a malformed explicit side.  Called even when
+    # the feature is off, so a bad box fails when it is written rather than the
+    # day someone sets `frames`.
+    exclusion_px, evidence_px = nucleus_extension_boxes(cfg)
+    if extend_frames and evidence_px > exclusion_px:
+        raise ConfigError(
+            f"cells.extend_nuclei.evidence_px ({evidence_px}) is wider than "
+            f"exclusion_px ({exclusion_px}): the SAM3 evidence box would reach "
+            f"outside the box the neighbour test cleared"
         )
 
     # ---- features ------------------------------------------------------- #
@@ -742,6 +870,9 @@ def validate_inputs(cfg: dict) -> list[str]:
     # nuclei run adds no root of its own -- only a file to look for.
     roots = ["ground_truth_tracks_dir", "image_crops_dir"]
     reads_nuclei = get_path(cfg, "cells.source", None) == "nuclei"
+    extension = nucleus_extension(cfg)
+    if extension is not None:
+        roots.append("sam3_tracks_dir")
     for key in roots:
         directory = Path(get_path(cfg, f"paths.{key}", "") or "")
         if not directory.is_dir():
@@ -761,6 +892,7 @@ def validate_inputs(cfg: dict) -> list[str]:
     # The nucleus tracks sit in the image crop directory, beside crop.tiff.
     gt_root = Path(get_path(cfg, "paths.ground_truth_tracks_dir", "") or "")
     img_root = Path(get_path(cfg, "paths.image_crops_dir", "") or "")
+    sam3_root = Path((extension or {}).get("sam3_tracks_dir") or "")
     for crop in crop_ids(cfg):
         well = crop.split("_", 1)[0]
         candidates = [
@@ -770,6 +902,10 @@ def validate_inputs(cfg: dict) -> list[str]:
         ]
         if reads_nuclei:
             candidates.append(img_root / well / crop / "nuclei_tracks.tiff")
+        if extension is not None:
+            candidates.append(img_root / well / crop / "nuclei_div.pkl")
+            # Flat: one directory per crop id, unlike every other root here.
+            candidates.append(sam3_root / crop / "tracks.tiff")
         for candidate in candidates:
             if not candidate.is_file():
                 problems.append(f"crop {crop}: missing {candidate}")

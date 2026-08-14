@@ -1,0 +1,45 @@
+# dino_focus_nuc_k10_p30-50_lag1, with terminating nuclei held three frames.
+#
+# The test arm for cells.extend_nuclei on a DINO run.  Its control is the
+# existing dino_focus_nuc_k10_p30-50_lag1.
+#
+# NOT a clean pair any more: this arm also carries cells.min_frames: 1 while the
+# control is on the inherited 10, so it differs from the control in TWO keys and
+# the cell sets are not comparable.  Give the control the same min_frames before
+# reading anything into a difference between them.
+#
+# Spelled out in full rather than extending dino_focus/_base.yml, which is
+# untracked on some checkouts.
+#
+# The boxes are the inherited 50/30 -- ordinary config values, no longer derived
+# from patch_px.
+extends: ../default.yml
+
+run_name: dino_focus_nuc_k10_p30-50_lag1_ext3
+description: >-
+  As dino_focus_nuc_k10_p30-50_lag1, holding terminating nuclei three frames.
+
+cells:
+  source: nuclei
+  min_frames: 1           # was 10 (default.yml); the floor, equal to warmup_frames.
+                          # Admits every track, single-frame ones included -- safe
+                          # here only because model.features is empty, so no
+                          # temporal feature is undefined on a one-frame cell.
+  extend_nuclei:
+    frames: 3
+
+dino:
+  n_pcs: 10
+  patch_px: [30, 50]
+  patch_overlay: rfp
+  rfp_alpha: 0.3
+
+model:
+  features: []            # DINO PCs only; list replacement wipes the default four
+  use_dino_pcs: true
+  num_states: 10
+  num_lags: 1
+  em_seeds: [0, 1, 2]
+
+outputs:
+  extras: [state_timeline, condition_stats, dino_confounds]

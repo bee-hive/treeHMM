@@ -1,0 +1,30 @@
+# dino_focus_nuc_k10_p30-50_lag1_ext3, with narrower extension boxes.
+#
+# Extends the arm itself rather than restating it, so the only difference from
+# it is the two box sides -- mappings merge key by key, so naming exclusion_px
+# and evidence_px leaves `frames: 3` and `cells.min_frames: 1` inherited.
+#
+# 50/30 -> 30/25 loosens the neighbour test and tightens the evidence test at
+# the same time, and the two do not move together:
+#
+#   exclusion_px 50 -> 30  halves the half-width to 15 px, so a neighbour has to
+#     be much closer to block.  On B8_t50t100 label 15 this is decisive -- its
+#     blocker, label 4, has its nearest pixel 20.7 px (chebyshev) from the last
+#     centroid, inside a 50 px box and outside a 30 px one.  Nucleus 2 there is
+#     unaffected: its blocker sits 1.4-3.6 px away, inside any box worth having.
+#
+#   evidence_px 30 -> 25  shrinks the window SAM3 must fill, so phase support
+#     has to be nearer the nucleus to count.  Strictly the stricter of the two.
+#
+# Expect more tracks held than the 50/30 arm, driven by the exclusion change.
+# Compare against dino_focus_nuc_k10_p30-50_lag1_ext3 and nothing else.
+extends: dino_focus_nuc_k10_p30-50_lag1_ext3.yml
+
+run_name: dino_focus_nuc_k10_p30-50_lag1_ext3_box30-25
+description: >-
+  As dino_focus_nuc_k10_p30-50_lag1_ext3, with exclusion_px 30 and evidence_px 25.
+
+cells:
+  extend_nuclei:
+    exclusion_px: 30
+    evidence_px: 25

@@ -15,6 +15,13 @@ See `README.md` for the full probabilistic model and `Derivation/` for the forwa
 - Cancer Nuclei Tracks: `/gladstone/engelhardt/lab/MarsonLabIncucyteData/TrackingCrops/CarnevaleRepStim/<well_id>/<well_id>_<slice_id>/nuclei_tracks.tiff`
     - shape (T, Y, X), in the same crop directory as `crop.tiff` below
     - supersedes the old flat `groundTruthCalibanTracks/<well_id>_<slice_id>.tiff`, whose tracks were wrong
+- Cancer Nuclei Divisions: `.../CarnevaleRepStim/<well_id>/<well_id>_<slice_id>/nuclei_div.pkl`
+    - pickled pandas DataFrame of `parent, daughter_1, daughter_2, frame`
+    - read **only** by `cells.extend_nuclei`; it does not feed the tree half of the model
+- SAM3 Phase Tracks: `/gladstone/engelhardt/lab/MarsonLabIncucyteData/BenchmarkingRuns/tracking_method_outputs/SAM3_finetuned_v2/<well_id>_<slice_id>/tracks.tiff`
+    - shape (T, Y, X); note the **flat** layout, with no well level, unlike every other root
+    - no cell-type channel, so "a cell is here" is exactly "a non-zero pixel is here"
+    - read **only** by `cells.extend_nuclei`, and only as a presence test
 - Raw Phase image: `/gladstone/engelhardt/lab/MarsonLabIncucyteData/TrackingCrops/CarnevaleRepStim/<well_id>/<well_id>_<slice_id>/B4_<slice_id>/crop.tiff`
     - shape (T, Y, X, 2)
         - in last channel, 0 is RFP intensity, 1 is phase image
@@ -40,6 +47,21 @@ accepted. Naming several (`[30, 50, 70]`) embeds the cell once per size and **av
 embeddings inside the `dino` step**, before PCA — so one multi-scale vector leaves it in the same
 shape one size gives, and nothing downstream changes. `50` and `[50]` hash identically, so
 switching to list form orphaned no cache.
+
+`cells.extend_nuclei` (nuclei runs only, `frames: 0` and so off by default) holds a nucleus
+track that stops before the SAM3 phase track covering the same area does — plausibly a death
+the tracker could not follow — for `frames` more frames, copying its final mask forward
+verbatim. A track qualifies only if it really ended, is not a parent in `nuclei_div.pkl`, has
+no other nucleus within `exclusion_px` and still has a SAM3 mask within `evidence_px`, in
+every frame appended; otherwise it gains none. The end of the movie clips the budget rather
+than refusing it. `exclusion_px` and `evidence_px` are ordinary config options (50/30 by
+default) — **DINO is not involved**: `cells.source: nuclei` is the entire requirement, because
+the criteria are measured from the nucleus centroid. They used to be derivable from
+`dino.patch_px` via `auto`, which is gone; a config still saying `auto` is refused by name.
+It is deliberately small — 6 of 224 tracks on the ground-truth crops — and
+`nucleus_extension.csv` in the features cache records every candidate and its verdict, which
+you need because a held frame freezes every shape feature. Full criteria in
+`prompts/nuclei-frame-extension.md`.
 
 Cached steps are content-addressed under `analysis/cache/<step>/<key>/` and shared across
 runs, so a sweep over `model.*` recomputes only `fit` onward.
