@@ -2,12 +2,14 @@
 #
 # Self-contained rather than extending a `nuclei_k5.yml`, so it stands up on a
 # checkout that does not have one.  Mappings merge key by key, so naming
-# `frames` alone leaves `exclusion_px`/`evidence_px` on their inherited `auto`.
+# `frames` alone leaves `exclusion_px`/`evidence_px` on the inherited 50/30.
 #
-# `auto` follows dino.patch_px, and this run has no DINO, so the boxes are the
-# 50/30 fallback.  Expect very few tracks to qualify -- 6 of 224 on the six
-# ground-truth crops, adding 30 of 5361 cell-frames.  See
-# prompts/nuclei-frame-extension.md.
+# Those are ordinary config values -- they used to be derivable from
+# dino.patch_px via `auto`, which is gone, and a config still saying `auto` is
+# refused by name.  No DINO here, and none is needed: the extension asks only
+# for cells.source: nuclei, since its criteria are measured from the nucleus
+# centroid.  Expect very few tracks to qualify -- 6 of 224 on the six
+# ground-truth crops, adding 30 of 5361 cell-frames.
 extends: base_k5.yml
 
 run_name: nuclei_k5_ext5

@@ -70,6 +70,14 @@ AGE_ANCHORS = ("existence", "inferred")
 #: `outputs.auto_dino_extras: false` to run only what the config names.
 DINO_DEFAULT_EXTRAS = ("dino_step_distance",)
 
+#: Extras added to every run that extends nuclei, named or not.  Same reasoning
+#: as `DINO_DEFAULT_EXTRAS`: holding a track invents cell-frames on the strength
+#: of the SAM3 masks, and `sam3_overlay` is the only output that shows what
+#: SAM3 actually saw -- without it the evidence for an invented frame is
+#: unauditable.  Set `outputs.auto_extension_extras: false` to run only what the
+#: config names.
+EXTENSION_DEFAULT_EXTRAS = ("sam3_overlay",)
+
 #: Default box sides for `cells.extend_nuclei`: `(exclusion, evidence)`, in
 #: pixels.  Both are ordinary config options -- see `nucleus_extension_boxes`
 #: for why they no longer follow `dino.patch_px`.  These values are what the
@@ -405,9 +413,12 @@ def dino_column_names(cfg: dict) -> list[str]:
 def resolved_extras(cfg: dict) -> list[str]:
     """The extras this run actually produces, in the order they run.
 
-    What `outputs.extras` names, followed by any `DINO_DEFAULT_EXTRAS` the run
-    qualifies for and did not already name.  Auto-included extras come last so
-    that an explicit list still controls the order of everything in it.
+    What `outputs.extras` names, followed by any `DINO_DEFAULT_EXTRAS` and
+    `EXTENSION_DEFAULT_EXTRAS` the run qualifies for and did not already name.
+    Auto-included extras come last so that an explicit list still controls the
+    order of everything in it, and the two automatic groups are appended in a
+    fixed order so the resolved list -- which the `extras` step key hashes --
+    cannot depend on dict iteration.
 
     Every reader of `outputs.extras` goes through here -- validation, the extras
     step, `active_steps` and the step key -- so a run cannot produce an extra
@@ -420,9 +431,22 @@ def resolved_extras(cfg: dict) -> list[str]:
         list[str]: extra names.
     """
     named = list(get_path(cfg, "outputs.extras", []) or [])
-    if not uses_dino(cfg) or not get_path(cfg, "outputs.auto_dino_extras", True):
-        return named
-    return named + [name for name in DINO_DEFAULT_EXTRAS if name not in named]
+
+    automatic: list[str] = []
+    if uses_dino(cfg) and get_path(cfg, "outputs.auto_dino_extras", True):
+        automatic += list(DINO_DEFAULT_EXTRAS)
+    # Keyed off the same record the `features` step hashes, so the overlay is
+    # added exactly when a track could actually be held -- never on a run whose
+    # `frames: 0` means no SAM3 file is opened at all.
+    if (nucleus_extension(cfg) is not None
+            and get_path(cfg, "outputs.auto_extension_extras", True)):
+        automatic += list(EXTENSION_DEFAULT_EXTRAS)
+
+    resolved = list(named)
+    for name in automatic:
+        if name not in resolved:
+            resolved.append(name)
+    return resolved
 
 
 def dino_patch_sizes(cfg: dict) -> list[int]:

@@ -377,6 +377,11 @@ class CacheKeys(unittest.TestCase):
         self.cfg = C.load_config(SMOKE)
         self.cfg["outputs"]["extras"] = []
         self.cfg["outputs"]["auto_dino_extras"] = False
+        # Likewise for the extension's automatic extra: without this, every test
+        # here that switches `extend_nuclei` on would silently also be asserting
+        # that the extras step went from inactive to active.  `ResolvedExtras`
+        # covers that behaviour directly.
+        self.cfg["outputs"]["auto_extension_extras"] = False
 
     @staticmethod
     def keys(cfg):
@@ -622,6 +627,45 @@ class AutoDinoExtras(unittest.TestCase):
     def test_the_opt_out_leaves_only_what_was_named(self):
         cfg = self.dino(extras=["state_timeline"], auto_dino_extras=False)
         self.assertEqual(C.resolved_extras(cfg), ["state_timeline"])
+
+    # ---- the extension's automatic extra ---------------------------------- #
+
+    def extending(self, **outputs):
+        cfg = copy.deepcopy(self.cfg)
+        cfg["cells"]["source"] = "nuclei"
+        cfg["cells"]["extend_nuclei"]["frames"] = 3
+        cfg["outputs"].update(outputs)
+        return cfg
+
+    def test_an_extending_run_gets_the_sam3_overlay(self):
+        self.assertEqual(C.resolved_extras(self.extending()),
+                         list(C.EXTENSION_DEFAULT_EXTRAS))
+
+    def test_a_run_that_extends_nothing_does_not(self):
+        """`frames: 0` opens no SAM3 file, so there is nothing to draw."""
+        nuclei = copy.deepcopy(self.cfg)
+        nuclei["cells"]["source"] = "nuclei"
+        self.assertEqual(C.resolved_extras(nuclei), [])
+        # ... and neither does a phase run that asks for it, since the record is
+        # None there too.
+        self.assertEqual(C.resolved_extras(self.cfg), [])
+
+    def test_the_extension_opt_out_leaves_only_what_was_named(self):
+        cfg = self.extending(extras=["state_timeline"], auto_extension_extras=False)
+        self.assertEqual(C.resolved_extras(cfg), ["state_timeline"])
+
+    def test_naming_the_sam3_overlay_explicitly_does_not_duplicate_it(self):
+        cfg = self.extending(extras=[C.EXTENSION_DEFAULT_EXTRAS[0]])
+        self.assertEqual(C.resolved_extras(cfg), [C.EXTENSION_DEFAULT_EXTRAS[0]])
+
+    def test_both_automatic_groups_appear_in_a_fixed_order(self):
+        """The `extras` step key hashes this list, so its order must be stable."""
+        cfg = self.extending(extras=["state_timeline"])
+        cfg["model"]["use_dino_pcs"] = True
+        self.assertEqual(
+            C.resolved_extras(cfg),
+            ["state_timeline", *C.DINO_DEFAULT_EXTRAS, *C.EXTENSION_DEFAULT_EXTRAS],
+        )
 
     def test_they_activate_the_extras_step_on_their_own(self):
         """`outputs.extras: []` no longer means "no extras step" for a DINO run."""

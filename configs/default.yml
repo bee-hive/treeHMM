@@ -22,8 +22,15 @@ cells:
   # and t_cell_neighbors are not comparable between the two.
   source: phase                          # [phase, nuclei]
 
-  # drop cells observed for fewer than this many frames
-  min_frames: 1                         # int > cells.warmup_frames
+  # drop cells observed for fewer than this many frames.  Equal to warmup_frames
+  # is the floor, and 1 is that floor: it keeps every track, single-frame ones
+  # included.  Such a cell survives filtering and then `apply_warmup` keeps its
+  # only frame -- its FIRST active frame, where velocity and every delta are
+  # NaN, which `fit` zeroes rather than masks.  Harmless for a DINO-only run
+  # (model.features: []); a run whose model.features holds a temporal feature
+  # gets a handful of fabricated zero-motion observations (18 cell-frames of
+  # ~5200 on the six ground-truth crops).
+  min_frames: 1                          # int >= cells.warmup_frames
 
   # leading frames per cell excluded from inference; held fixed across num_lags
   warmup_frames: 1                       # int >= 1
@@ -205,6 +212,11 @@ outputs:
   # whether the embedding tracks the cell or the per-frame noise is not an
   # optional question about a DINO run.  Set false to run only what is named.
   auto_dino_extras: true                 # [true, false]
+
+  # likewise, a run with cells.extend_nuclei on gets sam3_overlay: holding a
+  # track invents cell-frames on the strength of the SAM3 masks, and this is the
+  # only output that shows what SAM3 saw.  Set false to run only what is named.
+  auto_extension_extras: true            # [true, false]
 
   # settings for the dino_step_distance extra; like every extra's settings these
   # are NOT in any cache key, so changing one needs `--force` on extras
